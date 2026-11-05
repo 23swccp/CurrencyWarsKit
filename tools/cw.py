@@ -40,6 +40,20 @@ def main():
     start.add_argument("--method", choices=["framepool", "screendc", "printwindow"],
                        default="framepool", help="截图方式；默认 framepool，不自动切换")
     commands.add_parser("screenshot", help="截图到 .runtime/screenshots，按本次运行编号并返回观察令牌")
+    act = commands.add_parser("act", help="执行基础输入")
+    actions = act.add_subparsers(dest="action", required=True)
+    click = actions.add_parser("click", help="按截图像素坐标单击一次并重新截图")
+    click.add_argument("--x", type=int, required=True)
+    click.add_argument("--y", type=int, required=True)
+    click.add_argument("--state", required=True, help="截图返回的观察令牌")
+    drag = actions.add_parser("drag", help="按截图坐标拖动一次并重新截图")
+    for flag in ("from-x", "from-y", "to-x", "to-y"):
+        drag.add_argument("--" + flag, type=int, required=True)
+    drag.add_argument("--duration", type=int, default=500, help="拖动时长，毫秒；1 至 10000，默认 500")
+    drag.add_argument("--state", required=True, help="截图返回的观察令牌")
+    press = actions.add_parser("press", help="按下并释放一个按键，再重新截图")
+    press.add_argument("--key", required=True, type=str.lower, help="按键名，如 escape、enter、a 或 1")
+    press.add_argument("--state", required=True, help="截图返回的观察令牌")
     args = parser.parse_args()
     if args.command == "version":
         data = {"result": "success", "version": VERSION}
@@ -49,7 +63,14 @@ def main():
         try:
             if sys.platform != "win32":
                 raise RuntimeError("窗口与运行控制目前仅支持 Windows")
+            import input as game_input
             import service
+
+            # 防：命令行传入未支持的按键或超出通信时限的拖动时长。
+            if args.command == "act" and args.action == "press" and args.key not in game_input.KEYS:
+                parser.error("不支持的按键；支持 escape、enter、space、tab、backspace、方向键、字母和数字")
+            if args.command == "act" and args.action == "drag" and not 1 <= args.duration <= 10000:
+                parser.error("拖动时长必须为 1 至 10000 毫秒")
 
             if args.command == "windows":
                 service.init_maa()
@@ -63,7 +84,14 @@ def main():
             else:
                 if not service.INFO.exists():
                     raise RuntimeError("服务未启动；请先运行 start --hwnd 窗口句柄")
-                data = service.request(args.command)
+                if args.command == "act":
+                    fields = {"click": ("x", "y"), "drag": ("from_x", "from_y", "to_x", "to_y", "duration"),
+                              "press": ("key",)}[args.action]
+                    payload = {field: getattr(args, field) for field in fields}
+                    payload["state"] = args.state
+                    data = service.request(args.action, data=payload)
+                else:
+                    data = service.request(args.command)
         except ModuleNotFoundError as error:
             data = {"result": "failed", "message": f"{error}；请用当前 Python 安装 requirements.txt"}
         except (OSError, RuntimeError, ValueError) as error:

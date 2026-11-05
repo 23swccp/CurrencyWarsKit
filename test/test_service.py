@@ -164,6 +164,108 @@ class HttpTests(unittest.TestCase):
         second = service.request("resync", info=self.info)
         self.assertNotEqual(second["state"], first["state"])
 
+    def test_click_consumes_token_and_returns_new_snapshot(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        session.controller.post_click.return_value.wait.return_value.succeeded = True
+        old = service.request("screenshot", info=self.info)["state"]
+        result = service.request("click", info=self.info, data={"x": 99, "y": 49, "state": old})
+        self.assertEqual(result["result"], "success")
+        self.assertEqual(result["screenshot"], "fixture.png")
+        self.assertNotEqual(result["state"], old)
+        session.controller.post_click.assert_called_once_with(99, 49)
+        stale = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": old})
+        self.assertEqual(stale["reason"], "stale_state")
+        session.controller.post_click.assert_called_once()
+
+    def test_click_rejects_bad_payload_and_outside_coordinates(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        state = service.request("screenshot", info=self.info)["state"]
+        for data in ({"x": True, "y": 1, "state": state}, {"x": 1, "y": 1},
+                     {"x": 1, "y": 1, "state": ""}, {"x": 1, "y": 1, "state": state, "extra": 1}):
+            self.assertEqual(self.send("/click", json.dumps(data).encode())[0], 400)
+        result = service.request("click", info=self.info, data={"x": 100, "y": 0, "state": state})
+        self.assertEqual(result["result"], "failed")
+        session.controller.post_click.assert_not_called()
+
+    def test_click_failure_or_followup_capture_is_uncertain(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        for click_ok in (False, True):
+            with self.subTest(click_ok=click_ok):
+                session.capture.side_effect = None
+                state = service.request("screenshot", info=self.info)["state"]
+                session.controller.post_click.return_value.wait.return_value.succeeded = click_ok
+                session.capture.side_effect = RuntimeError("截图失败") if click_ok else None
+                result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+                self.assertEqual(result["result"], "uncertain")
+                self.assertIsNone(session.state)
+
+    def test_busy_click_does_not_send_input(self):
+        session = self.server.session
+        session.controller = Mock()
+        state = service.request("screenshot", info=self.info)["state"]
+        with session.operation_lock:
+            result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+        self.assertEqual(result["result"], "busy")
+        session.controller.post_click.assert_not_called()
+
+    def test_drag_and_press_publish_snapshots_and_reject_stale_state(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        session.controller.post_swipe.return_value.wait.return_value.succeeded = True
+        session.controller.post_click_key.return_value.wait.return_value.succeeded = True
+        state = service.request("screenshot", info=self.info)["state"]
+        drag = {"from_x": 1, "from_y": 2, "to_x": 99, "to_y": 49, "duration": 500, "state": state}
+        result = service.request("drag", info=self.info, data=drag)
+        session.controller.post_swipe.assert_called_once_with(1, 2, 99, 49, 500)
+        self.assertEqual(result["result"], "success")
+        self.assertNotEqual(result["state"], state)
+        self.assertEqual(service.request("drag", info=self.info, data=drag)["reason"], "stale_state")
+        session.controller.post_swipe.assert_called_once()
+        result = service.request("press", info=self.info, data={"key": "escape", "state": result["state"]})
+        self.assertEqual(result["result"], "success")
+        session.controller.post_click_key.assert_called_once_with(0x1B)
+
+    def test_drag_and_press_reject_invalid_inputs(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        state = service.request("screenshot", info=self.info)["state"]
+        drag = {"from_x": 0, "from_y": 0, "to_x": 10, "to_y": 10, "duration": 500, "state": state}
+        for change in ({"duration": 0}, {"duration": 10001}, {"duration": True}, {"to_x": "10"}):
+            self.assertEqual(self.send("/drag", json.dumps({**drag, **change}).encode())[0], 400)
+        for key in ("unknown", "A", 1):
+            self.assertEqual(self.send("/press", json.dumps({"key": key, "state": state}).encode())[0], 400)
+        result = service.request("drag", info=self.info, data={**drag, "to_x": 100})
+        self.assertEqual(result["result"], "failed")
+        session.controller.post_swipe.assert_not_called()
+        session.controller.post_click_key.assert_not_called()
+
+    def test_drag_and_press_failures_are_uncertain_and_busy_does_not_send(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        for command, payload, method in (
+            ("drag", {"from_x": 1, "from_y": 1, "to_x": 2, "to_y": 2, "duration": 500}, "post_swipe"),
+            ("press", {"key": "a"}, "post_click_key"),
+        ):
+            with self.subTest(command=command):
+                state = service.request("screenshot", info=self.info)["state"]
+                data = {**payload, "state": state}
+                target = getattr(session.controller, method)
+                with session.operation_lock:
+                    self.assertEqual(service.request(command, info=self.info, data=data)["result"], "busy")
+                target.assert_not_called()
+                target.return_value.wait.return_value.succeeded = False
+                self.assertEqual(service.request(command, info=self.info, data=data)["result"], "uncertain")
+                self.assertIsNone(session.state)
+
     def test_local_client_does_not_use_proxy(self):
         with patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1", "NO_PROXY": ""}):
             self.assertEqual(service.request("status", info=self.info)["result"], "success")

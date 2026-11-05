@@ -1,6 +1,7 @@
 """本机常驻服务：保留窗口连接，串行执行操作，管理观察令牌。"""
 
 import argparse
+import input as game_input
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -94,6 +95,7 @@ class Session:
         self.prefix = uuid4().hex
         self.counter = 0
         self.error = None
+        self.image_size = None
 
     def connect(self):
         from maa.controller import Win32Controller
@@ -111,8 +113,8 @@ class Session:
         }
         controller = Win32Controller(
             self.hwnd, methods[self.method],
-            mouse_method=MaaWin32InputMethodEnum.Null,
-            keyboard_method=MaaWin32InputMethodEnum.Null,
+            mouse_method=MaaWin32InputMethodEnum.Seize,
+            keyboard_method=MaaWin32InputMethodEnum.Seize,
         )
         if not controller.post_connection().wait().succeeded:
             raise RuntimeError(f"连接窗口 {self.hwnd} 失败")
@@ -132,7 +134,7 @@ class Session:
             }
 
     def run(self, name, action, state=None):
-        """操作共用此入口；未来输入动作必须提供观察令牌。"""
+        """操作共用此入口；输入动作必须提供观察令牌。"""
         if not self.operation_lock.acquire(blocking=False):
             return {"result": "busy", "message": "正在执行另一个操作"}
         try:
@@ -146,7 +148,7 @@ class Session:
                 self.error = None
             try:
                 data = action()
-            except (OSError, RuntimeError, ModuleNotFoundError) as error:
+            except (OSError, RuntimeError, ModuleNotFoundError, ValueError) as error:
                 with self.metadata_lock:
                     self.error = str(error)
                 raise
@@ -172,6 +174,7 @@ class Session:
             raise RuntimeError("MaaFramework 返回空截图")
         path = RUNTIME / "screenshots" / f"{self.counter + 1}.png"
         Image.fromarray(image[:, :, ::-1]).save(path, format="PNG")
+        self.image_size = (image.shape[1], image.shape[0])
         return {"hwnd": self.hwnd, "title": self.title, "method": self.method,
                 "screenshot": str(path.resolve()), "width": image.shape[1], "height": image.shape[0]}
 
@@ -205,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({"result": "failed", "message": "仅接受 POST JSON 请求"}, 405)
 
     def do_POST(self):
-        if self.path not in {"/status", "/stop", "/screenshot", "/resync"}:
+        if self.path not in {"/status", "/stop", "/screenshot", "/resync", "/click", "/drag", "/press"}:
             self.reply({"result": "failed", "message": "接口不存在"}, 404)
             return
         try:
@@ -223,7 +226,22 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             self.reply({"result": "failed", "message": "请求必须是 JSON 对象"}, 400)
             return
-        if data:
+        # 防：HTTP 客户端缺少令牌、传入无效参数或多余字段。
+        if self.path in {"/click", "/drag", "/press"}:
+            fields = {"/click": {"x", "y"}, "/drag": {"from_x", "from_y", "to_x", "to_y", "duration"},
+                      "/press": {"key"}}[self.path]
+            valid = (set(data) == fields | {"state"} and isinstance(data["state"], str)
+                     and bool(data["state"]))
+            if valid and self.path == "/press":
+                valid = isinstance(data["key"], str) and data["key"] in game_input.KEYS
+            elif valid:
+                valid = all(type(data[field]) is int for field in fields)
+                # 防：拖动持续时间过长使客户端超过 30 秒超时。
+                if valid and self.path == "/drag":
+                    valid = 1 <= data["duration"] <= 10000
+        else:
+            valid = not data
+        if not valid:
             self.reply({"result": "failed", "message": "请求参数不符合接口约定"}, 400)
             return
         session = self.server.session
@@ -234,17 +252,26 @@ class Handler(BaseHTTPRequestHandler):
                 session.stop()
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 result = {"result": "success", "status": "stopping"}
+            elif self.path == "/click":
+                result = session.run("click", lambda: game_input.click(session.controller, session.image_size, session.capture, data["x"], data["y"]), data["state"])
+            elif self.path == "/drag":
+                result = session.run("drag", lambda: game_input.drag(session.controller, session.image_size, session.capture,
+                                     data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"]), data["state"])
+            elif self.path == "/press":
+                result = session.run("press", lambda: game_input.press(session.controller, session.capture, data["key"]), data["state"])
             else:
                 result = session.run(self.path[1:], session.capture)
-        except (OSError, RuntimeError, ModuleNotFoundError) as error:
+        except game_input.InputUncertain as error:
+            result = {"result": "uncertain", "message": str(error)}
+        except (OSError, RuntimeError, ModuleNotFoundError, ValueError) as error:
             result = {"result": "failed", "message": str(error)}
         self.reply(result)
 
 
-def request(command, info=None):
+def request(command, info=None, data=None):
     if info is None:
         info = json.loads(INFO.read_text(encoding="utf-8"))
-    req = Request(f"http://127.0.0.1:{info['port']}/{command}", data=b"{}", headers={
+    req = Request(f"http://127.0.0.1:{info['port']}/{command}", data=json.dumps(data if data is not None else {}).encode("utf-8"), headers={
         "Content-Type": "application/json",
     })
     try:
@@ -289,9 +316,7 @@ def stop():
     if not INFO.exists():
         return {"result": "success", "status": "stopped"}
     info = json.loads(INFO.read_text(encoding="utf-8"))
-    result = request("stop", info=info)
-    if result["result"] != "success":
-        return result
+    request("stop", info=info)
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
