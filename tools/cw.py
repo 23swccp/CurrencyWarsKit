@@ -54,6 +54,10 @@ def main():
     press = actions.add_parser("press", help="按下并释放一个按键，再重新截图")
     press.add_argument("--key", required=True, type=str.lower, help="按键名，如 escape、enter、a 或 1")
     press.add_argument("--state", required=True, help="截图返回的观察令牌")
+    move = actions.add_parser("move", help="在备战槽位之间拖动，结果需检查截图")
+    move.add_argument("--from", dest="source", required=True, help="来源槽位，如 bench_1")
+    move.add_argument("--to", dest="target", required=True, help="目标槽位，如 front_1")
+    move.add_argument("--state", required=True, help="截图返回的观察令牌")
     args = parser.parse_args()
     if args.command == "version":
         data = {"result": "success", "version": VERSION}
@@ -65,12 +69,20 @@ def main():
                 raise RuntimeError("窗口与运行控制目前仅支持 Windows")
             import input as game_input
             import service
+            from slots import SLOTS
 
+            # 防：命令行传入空观察令牌。
+            if args.command == "act" and not args.state:
+                parser.error("观察令牌不能为空")
             # 防：命令行传入未支持的按键或超出通信时限的拖动时长。
             if args.command == "act" and args.action == "press" and args.key not in game_input.KEYS:
                 parser.error("不支持的按键；支持 escape、enter、space、tab、backspace、方向键、字母和数字")
             if args.command == "act" and args.action == "drag" and not 1 <= args.duration <= 10000:
                 parser.error("拖动时长必须为 1 至 10000 毫秒")
+            # 防：命令行传入商店、无效槽位或相同的起点和终点。
+            if args.command == "act" and args.action == "move" and (
+                    args.source not in SLOTS or args.target not in SLOTS or args.source == args.target):
+                parser.error("来源和目标须为不同的备战席、前台或后台槽位")
 
             if args.command == "windows":
                 service.init_maa()
@@ -86,8 +98,10 @@ def main():
                     raise RuntimeError("服务未启动；请先运行 start --hwnd 窗口句柄")
                 if args.command == "act":
                     fields = {"click": ("x", "y"), "drag": ("from_x", "from_y", "to_x", "to_y", "duration"),
-                              "press": ("key",)}[args.action]
+                              "press": ("key",), "move": ("source", "target")}[args.action]
                     payload = {field: getattr(args, field) for field in fields}
+                    if args.action == "move":
+                        payload = {"from": payload["source"], "to": payload["target"]}
                     payload["state"] = args.state
                     data = service.request(args.action, data=payload)
                 else:

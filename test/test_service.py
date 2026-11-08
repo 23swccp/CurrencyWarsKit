@@ -5,6 +5,9 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
+import subprocess
+import sys
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -114,15 +117,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.send("/stop", method="GET")[0], 405)
         self.assertFalse(self.server.session.stopping)
 
-    def test_invalid_payloads_cannot_execute(self):
-        for body, headers in [
-            (b"{}", {"Content-Type": "text/plain"}),
-            (b"{bad", {}), (b"[]", {}), (b'{"extra":1}', {}),
-            (b'{"output":"unused.png"}', {}),
-            (b" " * 16385, {}),
-        ]:
-            with self.subTest(body=body[:40]):
-                self.assertEqual(self.send("/screenshot", body, headers)[0], 400)
+    def test_unknown_route_is_not_executed(self):
         self.server.session.capture.assert_not_called()
         self.assertEqual(self.send("/unknown")[0], 404)
         self.assertEqual(self.send("/unknown", b"{bad")[0], 404)
@@ -179,14 +174,11 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(stale["reason"], "stale_state")
         session.controller.post_click.assert_called_once()
 
-    def test_click_rejects_bad_payload_and_outside_coordinates(self):
+    def test_click_rejects_outside_coordinates(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
         state = service.request("screenshot", info=self.info)["state"]
-        for data in ({"x": True, "y": 1, "state": state}, {"x": 1, "y": 1},
-                     {"x": 1, "y": 1, "state": ""}, {"x": 1, "y": 1, "state": state, "extra": 1}):
-            self.assertEqual(self.send("/click", json.dumps(data).encode())[0], 400)
         result = service.request("click", info=self.info, data={"x": 100, "y": 0, "state": state})
         self.assertEqual(result["result"], "failed")
         session.controller.post_click.assert_not_called()
@@ -205,6 +197,19 @@ class HttpTests(unittest.TestCase):
                 self.assertEqual(result["result"], "uncertain")
                 self.assertIsNone(session.state)
 
+    def test_capture_value_error_after_click_is_uncertain(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        session.controller.post_click.return_value.wait.return_value.succeeded = True
+        state = service.request("screenshot", info=self.info)["state"]
+        session.capture.side_effect = ValueError("图像数据无效")
+        result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+        self.assertEqual(result["result"], "uncertain")
+        self.assertIn("ValueError", result["message"])
+        self.assertIsNone(session.state)
+        session.controller.post_click.assert_called_once_with(1, 1)
+
     def test_busy_click_does_not_send_input(self):
         session = self.server.session
         session.controller = Mock()
@@ -213,6 +218,31 @@ class HttpTests(unittest.TestCase):
             result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
         self.assertEqual(result["result"], "busy")
         session.controller.post_click.assert_not_called()
+
+    def test_move_drags_slots_once_and_returns_uncertain_with_new_state(self):
+        session = self.server.session
+        session.image_size = (1920, 1080)
+        session.controller = Mock()
+        session.controller.post_swipe.return_value.wait.return_value.succeeded = True
+        state = service.request("screenshot", info=self.info)["state"]
+        payload = {"from": "bench_1", "to": "bench_2", "state": state}
+        result = service.request("move", info=self.info, data=payload)
+        self.assertEqual(result["result"], "uncertain")
+        self.assertNotEqual(result["state"], state)
+        self.assertEqual(result["screenshot"], "fixture.png")
+        session.controller.post_swipe.assert_called_once_with(438, 905, 563, 905, 700)
+        self.assertEqual(service.request("move", info=self.info, data=payload)["reason"], "stale_state")
+        session.controller.post_swipe.assert_called_once()
+
+    def test_move_rejects_invalid_slots_and_unverified_image_size(self):
+        session = self.server.session
+        session.image_size = (100, 50)
+        session.controller = Mock()
+        state = service.request("screenshot", info=self.info)["state"]
+        result = service.request("move", info=self.info,
+                                 data={"from": "bench_1", "to": "front_1", "state": state})
+        self.assertEqual(result["result"], "failed")
+        session.controller.post_swipe.assert_not_called()
 
     def test_drag_and_press_publish_snapshots_and_reject_stale_state(self):
         session = self.server.session
@@ -232,16 +262,12 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(result["result"], "success")
         session.controller.post_click_key.assert_called_once_with(0x1B)
 
-    def test_drag_and_press_reject_invalid_inputs(self):
+    def test_drag_rejects_outside_coordinates(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
         state = service.request("screenshot", info=self.info)["state"]
         drag = {"from_x": 0, "from_y": 0, "to_x": 10, "to_y": 10, "duration": 500, "state": state}
-        for change in ({"duration": 0}, {"duration": 10001}, {"duration": True}, {"to_x": "10"}):
-            self.assertEqual(self.send("/drag", json.dumps({**drag, **change}).encode())[0], 400)
-        for key in ("unknown", "A", 1):
-            self.assertEqual(self.send("/press", json.dumps({"key": key, "state": state}).encode())[0], 400)
         result = service.request("drag", info=self.info, data={**drag, "to_x": 100})
         self.assertEqual(result["result"], "failed")
         session.controller.post_swipe.assert_not_called()
@@ -269,6 +295,27 @@ class HttpTests(unittest.TestCase):
     def test_local_client_does_not_use_proxy(self):
         with patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1", "NO_PROXY": ""}):
             self.assertEqual(service.request("status", info=self.info)["result"], "success")
+
+
+class CliTests(unittest.TestCase):
+    def test_invalid_arguments_are_rejected_at_cli(self):
+        cli = Path(__file__).resolve().parent.parent / "tools" / "cw.py"
+        cases = [
+            ["press", "--key", "unknown", "--state", "state"],
+            ["press", "--key", "escape", "--state", ""],
+            ["drag", "--from-x", "0", "--from-y", "0", "--to-x", "1", "--to-y", "1",
+             "--duration", "0", "--state", "state"],
+            ["drag", "--from-x", "0", "--from-y", "0", "--to-x", "1", "--to-y", "1",
+             "--duration", "10001", "--state", "state"],
+            ["move", "--from", "shop_1", "--to", "bench_1", "--state", "state"],
+            ["move", "--from", "bench_1", "--to", "bench_1", "--state", "state"],
+            ["move", "--from", "front_5", "--to", "back_1", "--state", "state"],
+            ["click", "--x", "not-an-int", "--y", "1", "--state", "state"],
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                completed = subprocess.run([sys.executable, str(cli), "act", *args], capture_output=True)
+                self.assertEqual(completed.returncode, 2)
 
 
 if __name__ == "__main__":

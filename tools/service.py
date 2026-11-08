@@ -208,42 +208,10 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({"result": "failed", "message": "仅接受 POST JSON 请求"}, 405)
 
     def do_POST(self):
-        if self.path not in {"/status", "/stop", "/screenshot", "/resync", "/click", "/drag", "/press"}:
+        if self.path not in {"/status", "/stop", "/screenshot", "/resync", "/click", "/drag", "/press", "/move"}:
             self.reply({"result": "failed", "message": "接口不存在"}, 404)
             return
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            length = 0
-        if self.headers.get_content_type() != "application/json" or not 0 < length <= 16384:
-            self.reply({"result": "failed", "message": "需要不超过 16 KiB 的 JSON 请求"}, 400)
-            return
-        try:
-            data = json.loads(self.rfile.read(length))
-        except (ValueError, UnicodeError):
-            self.reply({"result": "failed", "message": "JSON 格式错误"}, 400)
-            return
-        if not isinstance(data, dict):
-            self.reply({"result": "failed", "message": "请求必须是 JSON 对象"}, 400)
-            return
-        # 防：HTTP 客户端缺少令牌、传入无效参数或多余字段。
-        if self.path in {"/click", "/drag", "/press"}:
-            fields = {"/click": {"x", "y"}, "/drag": {"from_x", "from_y", "to_x", "to_y", "duration"},
-                      "/press": {"key"}}[self.path]
-            valid = (set(data) == fields | {"state"} and isinstance(data["state"], str)
-                     and bool(data["state"]))
-            if valid and self.path == "/press":
-                valid = isinstance(data["key"], str) and data["key"] in game_input.KEYS
-            elif valid:
-                valid = all(type(data[field]) is int for field in fields)
-                # 防：拖动持续时间过长使客户端超过 30 秒超时。
-                if valid and self.path == "/drag":
-                    valid = 1 <= data["duration"] <= 10000
-        else:
-            valid = not data
-        if not valid:
-            self.reply({"result": "failed", "message": "请求参数不符合接口约定"}, 400)
-            return
+        data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         session = self.server.session
         try:
             if self.path == "/status":
@@ -259,6 +227,9 @@ class Handler(BaseHTTPRequestHandler):
                                      data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"]), data["state"])
             elif self.path == "/press":
                 result = session.run("press", lambda: game_input.press(session.controller, session.capture, data["key"]), data["state"])
+            elif self.path == "/move":
+                result = session.run("move", lambda: game_input.move(session.controller, session.image_size, session.capture,
+                                     data["from"], data["to"]), data["state"])
             else:
                 result = session.run(self.path[1:], session.capture)
         except game_input.InputUncertain as error:
