@@ -1,9 +1,9 @@
 # 设计图
 
-| 分类 | 图 | 关注的问题 |
+| 命令 | 图 | 关注的问题 |
 |---|---|---|
-| `interaction/` | [CLI 与服务时序](interaction/cli-session.md) | 一条命令经过哪些组件，下一次观察由谁返回 |
-| `screens/` | [备战与商店状态](screens/preparation.md) | 当前画面允许哪些动作，动作后可能看到什么 |
-| `actions/` | [单次购买流程](actions/buy.md) | 一次输入如何执行，如何判定结果 |
+| `buy` | [CLI 与服务时序](buy/cli-session.md) | 一条命令经过哪些组件，下一次观察由谁返回 |
+| `buy` | [备战与商店状态](buy/preparation.md) | 当前画面允许哪些动作，动作后可能看到什么 |
+| `buy` | [单次购买流程](buy/buy.md) | 一次输入如何执行，如何判定结果 |
 
 这里记录可审阅的设计草案。`cw see` 和 `cw buy shop_1` 是拟议接口，现有 CLI 使用 `screenshot` 并可直接调用基础动作。游戏表现未经实机验证时，在对应图或表里标记待确认。
