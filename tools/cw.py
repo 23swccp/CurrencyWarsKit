@@ -27,9 +27,9 @@ def main():
     sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="货币战争 CLI：窗口连接与常驻服务")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("status", help="查询后台服务状态，不刷新观察令牌")
+    commands.add_parser("status", help="查询后台服务状态")
     commands.add_parser("stop", help="等待当前操作结束，释放连接并停止服务")
-    commands.add_parser("resync", help="重新截图并发布新的观察令牌")
+    commands.add_parser("resync", help="重新截图")
     commands.add_parser("version", help="查看程序版本")
     echo = commands.add_parser("echo", help="原样返回测试文字，不执行游戏操作")
     echo.add_argument("text", help="要返回的测试文字")
@@ -39,25 +39,21 @@ def main():
     start.add_argument("--hwnd", type=window_handle, required=True, help="windows 返回的窗口句柄")
     start.add_argument("--method", choices=["framepool", "screendc", "printwindow"],
                        default="framepool", help="截图方式；默认 framepool，不自动切换")
-    commands.add_parser("screenshot", help="截图到 .runtime/screenshots，按本次运行编号并返回观察令牌")
+    commands.add_parser("screenshot", help="截图到 .runtime/screenshots，返回编号后的文件路径")
     act = commands.add_parser("act", help="执行基础输入")
     actions = act.add_subparsers(dest="action", required=True)
     click = actions.add_parser("click", help="按截图像素坐标单击一次并重新截图")
     click.add_argument("--x", type=int, required=True)
     click.add_argument("--y", type=int, required=True)
-    click.add_argument("--state", required=True, help="截图返回的观察令牌")
     drag = actions.add_parser("drag", help="按截图坐标拖动一次并重新截图")
     for flag in ("from-x", "from-y", "to-x", "to-y"):
         drag.add_argument("--" + flag, type=int, required=True)
     drag.add_argument("--duration", type=int, default=500, help="拖动时长，毫秒；1 至 10000，默认 500")
-    drag.add_argument("--state", required=True, help="截图返回的观察令牌")
     press = actions.add_parser("press", help="按下并释放一个按键，再重新截图")
     press.add_argument("--key", required=True, type=str.lower, help="按键名，如 escape、enter、a 或 1")
-    press.add_argument("--state", required=True, help="截图返回的观察令牌")
     move = actions.add_parser("move", help="在备战槽位之间拖动，结果需检查截图")
     move.add_argument("--from", dest="source", required=True, help="来源槽位，如 bench_1")
     move.add_argument("--to", dest="target", required=True, help="目标槽位，如 front_1")
-    move.add_argument("--state", required=True, help="截图返回的观察令牌")
     args = parser.parse_args()
     if args.command == "version":
         data = {"result": "success", "version": VERSION}
@@ -71,9 +67,6 @@ def main():
             import service
             from slots import SLOTS
 
-            # 防：命令行传入空观察令牌。
-            if args.command == "act" and not args.state:
-                parser.error("观察令牌不能为空")
             # 防：命令行传入未支持的按键或超出通信时限的拖动时长。
             if args.command == "act" and args.action == "press" and args.key not in game_input.KEYS:
                 parser.error("不支持的按键；支持 escape、enter、space、tab、backspace、方向键、字母和数字")
@@ -102,7 +95,6 @@ def main():
                     payload = {field: getattr(args, field) for field in fields}
                     if args.action == "move":
                         payload = {"from": payload["source"], "to": payload["target"]}
-                    payload["state"] = args.state
                     data = service.request(args.action, data=payload)
                 else:
                     data = service.request(args.command)

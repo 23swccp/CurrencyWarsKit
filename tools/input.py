@@ -11,7 +11,10 @@ class InputUncertain(RuntimeError):
 
 
 def points_in_image(image_size, *points):
-    # 防：点击或拖动坐标超出生成当前令牌的截图范围。
+    # 防：会话尚未成功截图，坐标没有可用的宽高依据。
+    if image_size is None:
+        raise ValueError("没有可用的截图尺寸；请先运行 screenshot")
+    # 防：点击或拖动坐标超出最近一次截图的范围。
     if any(not (0 <= x < image_size[0] and 0 <= y < image_size[1]) for x, y in points):
         raise ValueError("输入坐标超出截图范围，未发送输入")
 

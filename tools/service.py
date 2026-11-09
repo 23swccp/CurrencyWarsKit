@@ -1,4 +1,4 @@
-"""本机常驻服务：保留窗口连接，串行执行操作，管理观察令牌。"""
+"""本机常驻服务：保留窗口连接，串行执行操作并保存截图。"""
 
 import argparse
 import input as game_input
@@ -91,9 +91,7 @@ class Session:
         self.metadata_lock = threading.Lock()
         self.stopping = False
         self.operation = None
-        self.state = None
-        self.prefix = uuid4().hex
-        self.counter = 0
+        self.screenshot_count = 0
         self.error = None
         self.image_size = None
 
@@ -130,20 +128,17 @@ class Session:
                 "status": "stopping" if self.stopping else "busy" if self.operation else "idle",
                 "pid": os.getpid(), "hwnd": self.hwnd, "title": self.title,
                 "connected": self.controller is not None, "method": self.method,
-                "operation": self.operation, "state": self.state, "error": self.error,
+                "operation": self.operation, "error": self.error,
             }
 
-    def run(self, name, action, state=None):
-        """操作共用此入口；输入动作必须提供观察令牌。"""
+    def run(self, name, action):
+        """串行执行截图和输入。"""
         if not self.operation_lock.acquire(blocking=False):
             return {"result": "busy", "message": "正在执行另一个操作"}
         try:
             with self.metadata_lock:
                 if self.stopping:
                     return {"result": "failed", "reason": "stopping", "message": "服务正在停止"}
-                if state is not None and state != self.state:
-                    return {"result": "failed", "reason": "stale_state", "message": "观察令牌已失效"}
-                self.state = None
                 self.operation = name
                 self.error = None
             try:
@@ -155,9 +150,7 @@ class Session:
             with self.metadata_lock:
                 if self.stopping:
                     return {"result": "failed", "reason": "stopping", "message": "服务正在停止，未发布新观察"}
-                self.counter += 1
-                self.state = f"{self.prefix}-{self.counter}"
-                return {"result": "success", **data, "state": self.state}
+                return {"result": "success", **data}
         finally:
             with self.metadata_lock:
                 self.operation = None
@@ -166,14 +159,17 @@ class Session:
     def capture(self):
         from PIL import Image
 
+        # 防：本次截图失败后，坐标输入继续使用之前的截图尺寸。
+        self.image_size = None
         job = self.controller.post_screencap().wait()
         if not job.succeeded:
             raise RuntimeError(f"窗口截图失败，截图方式：{self.method}；目标窗口可能已关闭")
         image = job.get()
         if image.size == 0:
             raise RuntimeError("MaaFramework 返回空截图")
-        path = RUNTIME / "screenshots" / f"{self.counter + 1}.png"
+        path = RUNTIME / "screenshots" / f"{self.screenshot_count + 1}.png"
         Image.fromarray(image[:, :, ::-1]).save(path, format="PNG")
+        self.screenshot_count += 1
         self.image_size = (image.shape[1], image.shape[0])
         return {"hwnd": self.hwnd, "title": self.title, "method": self.method,
                 "screenshot": str(path.resolve()), "width": image.shape[1], "height": image.shape[0]}
@@ -181,7 +177,6 @@ class Session:
     def stop(self):
         with self.metadata_lock:
             self.stopping = True
-            self.state = None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -221,15 +216,15 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 result = {"result": "success", "status": "stopping"}
             elif self.path == "/click":
-                result = session.run("click", lambda: game_input.click(session.controller, session.image_size, session.capture, data["x"], data["y"]), data["state"])
+                result = session.run("click", lambda: game_input.click(session.controller, session.image_size, session.capture, data["x"], data["y"]))
             elif self.path == "/drag":
                 result = session.run("drag", lambda: game_input.drag(session.controller, session.image_size, session.capture,
-                                     data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"]), data["state"])
+                                     data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"]))
             elif self.path == "/press":
-                result = session.run("press", lambda: game_input.press(session.controller, session.capture, data["key"]), data["state"])
+                result = session.run("press", lambda: game_input.press(session.controller, session.capture, data["key"]))
             elif self.path == "/move":
                 result = session.run("move", lambda: game_input.move(session.controller, session.image_size, session.capture,
-                                     data["from"], data["to"]), data["state"])
+                                     data["from"], data["to"]))
             else:
                 result = session.run(self.path[1:], session.capture)
         except game_input.InputUncertain as error:
@@ -279,7 +274,7 @@ def start(hwnd, method):
 
 def status():
     if not INFO.exists():
-        return {"result": "success", "status": "stopped", "connected": False, "state": None}
+        return {"result": "success", "status": "stopped", "connected": False}
     return request("status")
 
 

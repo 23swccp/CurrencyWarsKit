@@ -8,51 +8,47 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import threading
 import unittest
 from unittest.mock import Mock, patch
 
 import service
+import cw
 
 
 class SessionTests(unittest.TestCase):
     def setUp(self):
         self.session = service.Session(1, "framepool")
 
-    def test_observations_change_state_but_status_does_not(self):
-        first = self.session.run("screenshot", lambda: {"screenshot": "first.png"})
-        self.assertEqual(self.session.status()["state"], first["state"])
-        second = self.session.run("resync", lambda: {"screenshot": "second.png"})
-        self.assertNotEqual(first["state"], second["state"])
-        self.assertEqual(self.session.status()["state"], second["state"])
+    def test_successful_captures_use_sequential_filenames(self):
+        from numpy import zeros
 
-    def test_stale_state_never_calls_action(self):
-        old = self.session.run("screenshot", dict)["state"]
-        current = self.session.run("screenshot", dict)["state"]
-        action = Mock(return_value={})
-        self.assertEqual(self.session.run("input", action, old)["reason"], "stale_state")
-        action.assert_not_called()
-        self.assertEqual(self.session.state, current)
+        self.session.controller = Mock()
+        job = self.session.controller.post_screencap.return_value.wait.return_value
+        job.succeeded = True
+        job.get.return_value = zeros((2, 3, 3), dtype="uint8")
+        with TemporaryDirectory() as directory, patch.object(service, "RUNTIME", Path(directory)):
+            service.clear_screenshots()
+            first = self.session.run("screenshot", self.session.capture)
+            job.succeeded = False
+            with self.assertRaisesRegex(RuntimeError, "窗口截图失败"):
+                self.session.run("screenshot", self.session.capture)
+            self.assertIsNone(self.session.image_size)
+            job.succeeded = True
+            second = self.session.run("resync", self.session.capture)
+            self.assertEqual(Path(first["screenshot"]).name, "1.png")
+            self.assertEqual(Path(second["screenshot"]).name, "2.png")
+            self.assertTrue(Path(second["screenshot"]).is_file())
 
-    def test_restart_rejects_old_state(self):
-        old = self.session.run("screenshot", dict)["state"]
-        restarted = service.Session(1, "framepool")
-        action = Mock(return_value={})
-        self.assertEqual(restarted.run("input", action, old)["reason"], "stale_state")
-        action.assert_not_called()
-        self.assertNotEqual(restarted.run("screenshot", dict)["state"], old)
-
-    def test_failure_consumes_state_and_records_error(self):
-        old = self.session.run("screenshot", dict)["state"]
+    def test_failure_records_error_and_releases_operation(self):
         with self.assertRaisesRegex(RuntimeError, "测试失败"):
-            self.session.run("input", Mock(side_effect=RuntimeError("测试失败")), old)
-        self.assertIsNone(self.session.state)
+            self.session.run("input", Mock(side_effect=RuntimeError("测试失败")))
         self.assertEqual(self.session.status()["error"], "测试失败")
         self.assertIsNone(self.session.status()["operation"])
         self.assertEqual(self.session.run("screenshot", dict)["result"], "success")
 
-    def test_concurrent_operation_is_busy_and_state_is_consumed(self):
-        old = self.session.run("screenshot", dict)["state"]
+    def test_concurrent_operation_is_busy(self):
         entered, release = threading.Event(), threading.Event()
 
         def action():
@@ -62,19 +58,18 @@ class SessionTests(unittest.TestCase):
             return {}
 
         with ThreadPoolExecutor() as executor:
-            job = executor.submit(self.session.run, "input", action, old)
+            job = executor.submit(self.session.run, "input", action)
             try:
                 self.assertTrue(entered.wait(5))
                 status = self.session.status()
                 self.assertEqual(status["operation"], "input")
-                self.assertIsNone(status["state"])
                 other = Mock(return_value={})
-                self.assertEqual(self.session.run("input", other, old)["result"], "busy")
+                self.assertEqual(self.session.run("input", other)["result"], "busy")
                 other.assert_not_called()
             finally:
                 release.set()
             self.assertEqual(job.result(timeout=5)["result"], "success")
-        self.assertEqual(self.session.run("input", dict, old)["reason"], "stale_state")
+        self.assertEqual(self.session.run("input", dict)["result"], "success")
 
     def test_stop_invalidates_inflight_observation_and_rejects_more_work(self):
         def interrupted():
@@ -85,7 +80,6 @@ class SessionTests(unittest.TestCase):
         action = Mock(return_value={})
         self.assertEqual(self.session.run("screenshot", action)["reason"], "stopping")
         action.assert_not_called()
-        self.assertIsNone(self.session.state)
 
 
 class HttpTests(unittest.TestCase):
@@ -147,40 +141,41 @@ class HttpTests(unittest.TestCase):
                 self.assertEqual(code, 200)
                 self.assertEqual(result["status"], "stopping")
                 self.assertFalse(pending.done())
-                self.assertIsNone(self.server.session.status()["state"])
             finally:
                 release.set()
             self.assertEqual(pending.result(timeout=5)[1]["reason"], "stopping")
 
-    def test_client_and_resync_preserve_snapshot_state_relationship(self):
-        first = service.request("screenshot", info=self.info)
-        self.assertEqual(first["screenshot"], "fixture.png")
-        self.assertEqual(service.request("status", info=self.info)["state"], first["state"])
-        second = service.request("resync", info=self.info)
-        self.assertNotEqual(second["state"], first["state"])
+    def test_screenshot_and_resync_return_paths_without_state(self):
+        for command in ("screenshot", "resync"):
+            self.assertEqual(service.request(command, info=self.info),
+                             {"result": "success", "screenshot": "fixture.png"})
+        self.assertNotIn("state", service.request("status", info=self.info))
 
-    def test_click_consumes_token_and_returns_new_snapshot(self):
+    def test_click_returns_new_snapshot(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
         session.controller.post_click.return_value.wait.return_value.succeeded = True
-        old = service.request("screenshot", info=self.info)["state"]
-        result = service.request("click", info=self.info, data={"x": 99, "y": 49, "state": old})
+        result = service.request("click", info=self.info, data={"x": 99, "y": 49})
         self.assertEqual(result["result"], "success")
         self.assertEqual(result["screenshot"], "fixture.png")
-        self.assertNotEqual(result["state"], old)
         session.controller.post_click.assert_called_once_with(99, 49)
-        stale = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": old})
-        self.assertEqual(stale["reason"], "stale_state")
-        session.controller.post_click.assert_called_once()
+        session.capture.assert_called_once_with()
 
     def test_click_rejects_outside_coordinates(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
-        state = service.request("screenshot", info=self.info)["state"]
-        result = service.request("click", info=self.info, data={"x": 100, "y": 0, "state": state})
+        result = service.request("click", info=self.info, data={"x": 100, "y": 0})
         self.assertEqual(result["result"], "failed")
+        session.controller.post_click.assert_not_called()
+
+    def test_click_requires_screenshot_dimensions(self):
+        session = self.server.session
+        session.controller = Mock()
+        result = service.request("click", info=self.info, data={"x": 1, "y": 1})
+        self.assertEqual(result["result"], "failed")
+        self.assertIn("screenshot", result["message"])
         session.controller.post_click.assert_not_called()
 
     def test_click_failure_or_followup_capture_is_uncertain(self):
@@ -189,76 +184,62 @@ class HttpTests(unittest.TestCase):
         session.controller = Mock()
         for click_ok in (False, True):
             with self.subTest(click_ok=click_ok):
-                session.capture.side_effect = None
-                state = service.request("screenshot", info=self.info)["state"]
                 session.controller.post_click.return_value.wait.return_value.succeeded = click_ok
                 session.capture.side_effect = RuntimeError("截图失败") if click_ok else None
-                result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+                result = service.request("click", info=self.info, data={"x": 1, "y": 1})
                 self.assertEqual(result["result"], "uncertain")
-                self.assertIsNone(session.state)
 
     def test_capture_value_error_after_click_is_uncertain(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
         session.controller.post_click.return_value.wait.return_value.succeeded = True
-        state = service.request("screenshot", info=self.info)["state"]
         session.capture.side_effect = ValueError("图像数据无效")
-        result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+        result = service.request("click", info=self.info, data={"x": 1, "y": 1})
         self.assertEqual(result["result"], "uncertain")
         self.assertIn("ValueError", result["message"])
-        self.assertIsNone(session.state)
         session.controller.post_click.assert_called_once_with(1, 1)
 
     def test_busy_click_does_not_send_input(self):
         session = self.server.session
         session.controller = Mock()
-        state = service.request("screenshot", info=self.info)["state"]
         with session.operation_lock:
-            result = service.request("click", info=self.info, data={"x": 1, "y": 1, "state": state})
+            result = service.request("click", info=self.info, data={"x": 1, "y": 1})
         self.assertEqual(result["result"], "busy")
         session.controller.post_click.assert_not_called()
 
-    def test_move_drags_slots_once_and_returns_uncertain_with_new_state(self):
+    def test_move_drags_slots_once_and_returns_uncertain_with_snapshot(self):
         session = self.server.session
         session.image_size = (1920, 1080)
         session.controller = Mock()
         session.controller.post_swipe.return_value.wait.return_value.succeeded = True
-        state = service.request("screenshot", info=self.info)["state"]
-        payload = {"from": "bench_1", "to": "bench_2", "state": state}
+        payload = {"from": "bench_1", "to": "bench_2"}
         result = service.request("move", info=self.info, data=payload)
         self.assertEqual(result["result"], "uncertain")
-        self.assertNotEqual(result["state"], state)
         self.assertEqual(result["screenshot"], "fixture.png")
         session.controller.post_swipe.assert_called_once_with(438, 905, 563, 905, 700)
-        self.assertEqual(service.request("move", info=self.info, data=payload)["reason"], "stale_state")
-        session.controller.post_swipe.assert_called_once()
 
-    def test_move_rejects_invalid_slots_and_unverified_image_size(self):
+    def test_move_rejects_unverified_image_size(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
-        state = service.request("screenshot", info=self.info)["state"]
         result = service.request("move", info=self.info,
-                                 data={"from": "bench_1", "to": "front_1", "state": state})
+                                 data={"from": "bench_1", "to": "front_1"})
         self.assertEqual(result["result"], "failed")
         session.controller.post_swipe.assert_not_called()
 
-    def test_drag_and_press_publish_snapshots_and_reject_stale_state(self):
+    def test_drag_and_press_publish_snapshots(self):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
         session.controller.post_swipe.return_value.wait.return_value.succeeded = True
         session.controller.post_click_key.return_value.wait.return_value.succeeded = True
-        state = service.request("screenshot", info=self.info)["state"]
-        drag = {"from_x": 1, "from_y": 2, "to_x": 99, "to_y": 49, "duration": 500, "state": state}
+        drag = {"from_x": 1, "from_y": 2, "to_x": 99, "to_y": 49, "duration": 500}
         result = service.request("drag", info=self.info, data=drag)
         session.controller.post_swipe.assert_called_once_with(1, 2, 99, 49, 500)
         self.assertEqual(result["result"], "success")
-        self.assertNotEqual(result["state"], state)
-        self.assertEqual(service.request("drag", info=self.info, data=drag)["reason"], "stale_state")
-        session.controller.post_swipe.assert_called_once()
-        result = service.request("press", info=self.info, data={"key": "escape", "state": result["state"]})
+        self.assertEqual(result["screenshot"], "fixture.png")
+        result = service.request("press", info=self.info, data={"key": "escape"})
         self.assertEqual(result["result"], "success")
         session.controller.post_click_key.assert_called_once_with(0x1B)
 
@@ -266,8 +247,7 @@ class HttpTests(unittest.TestCase):
         session = self.server.session
         session.image_size = (100, 50)
         session.controller = Mock()
-        state = service.request("screenshot", info=self.info)["state"]
-        drag = {"from_x": 0, "from_y": 0, "to_x": 10, "to_y": 10, "duration": 500, "state": state}
+        drag = {"from_x": 0, "from_y": 0, "to_x": 10, "to_y": 10, "duration": 500}
         result = service.request("drag", info=self.info, data={**drag, "to_x": 100})
         self.assertEqual(result["result"], "failed")
         session.controller.post_swipe.assert_not_called()
@@ -282,15 +262,12 @@ class HttpTests(unittest.TestCase):
             ("press", {"key": "a"}, "post_click_key"),
         ):
             with self.subTest(command=command):
-                state = service.request("screenshot", info=self.info)["state"]
-                data = {**payload, "state": state}
                 target = getattr(session.controller, method)
                 with session.operation_lock:
-                    self.assertEqual(service.request(command, info=self.info, data=data)["result"], "busy")
+                    self.assertEqual(service.request(command, info=self.info, data=payload)["result"], "busy")
                 target.assert_not_called()
                 target.return_value.wait.return_value.succeeded = False
-                self.assertEqual(service.request(command, info=self.info, data=data)["result"], "uncertain")
-                self.assertIsNone(session.state)
+                self.assertEqual(service.request(command, info=self.info, data=payload)["result"], "uncertain")
 
     def test_local_client_does_not_use_proxy(self):
         with patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1", "NO_PROXY": ""}):
@@ -298,19 +275,26 @@ class HttpTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_click_sends_only_coordinates(self):
+        with (patch.object(sys, "argv", ["cw", "act", "click", "--x", "1", "--y", "2"]),
+              patch.object(service, "INFO", Mock()),
+              patch.object(service, "request", return_value={"result": "success"}) as request,
+              patch.object(cw, "output")):
+            self.assertEqual(cw.main(), 0)
+        request.assert_called_once_with("click", data={"x": 1, "y": 2})
+
     def test_invalid_arguments_are_rejected_at_cli(self):
         cli = Path(__file__).resolve().parent.parent / "tools" / "cw.py"
         cases = [
-            ["press", "--key", "unknown", "--state", "state"],
-            ["press", "--key", "escape", "--state", ""],
+            ["press", "--key", "unknown"],
             ["drag", "--from-x", "0", "--from-y", "0", "--to-x", "1", "--to-y", "1",
-             "--duration", "0", "--state", "state"],
+             "--duration", "0"],
             ["drag", "--from-x", "0", "--from-y", "0", "--to-x", "1", "--to-y", "1",
-             "--duration", "10001", "--state", "state"],
-            ["move", "--from", "shop_1", "--to", "bench_1", "--state", "state"],
-            ["move", "--from", "bench_1", "--to", "bench_1", "--state", "state"],
-            ["move", "--from", "front_5", "--to", "back_1", "--state", "state"],
-            ["click", "--x", "not-an-int", "--y", "1", "--state", "state"],
+             "--duration", "10001"],
+            ["move", "--from", "shop_1", "--to", "bench_1"],
+            ["move", "--from", "bench_1", "--to", "bench_1"],
+            ["move", "--from", "front_5", "--to", "back_1"],
+            ["click", "--x", "not-an-int", "--y", "1"],
         ]
         for args in cases:
             with self.subTest(args=args):
