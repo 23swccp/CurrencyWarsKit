@@ -40,8 +40,25 @@ def main():
     start.add_argument("--method", choices=["framepool", "screendc", "printwindow"],
                        default="framepool", help="截图方式；默认 framepool，不自动切换")
     commands.add_parser("screenshot", help="截图到 .runtime/screenshots，返回编号后的文件路径")
+    commands.add_parser("navigate", help="进入标准博弈，复位最高职级并开始对局")
+    commands.add_parser("preparation", help="识别备战页面与角色槽位")
+    commands.add_parser("prepare", help="进入备战流程，收奖励并返回观察")
+    commands.add_parser("strategy", help="读取投资策略选项与单项刷新次数")
+    commands.add_parser("protagonist", help="读取主角候选、光环与刷新费用")
+    commands.add_parser("battle", help="观察战斗阶段及当前截图")
     act = commands.add_parser("act", help="执行基础输入")
     actions = act.add_subparsers(dest="action", required=True)
+    actions.add_parser("collect", help="按住鼠标沿右侧奖励区遍历一轮并截图")
+    actions.add_parser("start-battle", help="点击出战一次，最多等待十秒确认战斗")
+    actions.add_parser("continue-battle", help="点击继续挑战，等待并进入备战流程")
+    actions.add_parser("protagonist-open", help="打开主角选择页")
+    actions.add_parser("protagonist-confirm", help="确认主角与光环，继续备战")
+    character = actions.add_parser("protagonist-character", help="拖选主角角色")
+    character.add_argument("--slot", choices=[f"{area}_{i}" for area, count in (("front", 4), ("back", 6))
+                                            for i in range(1, count + 1)], required=True)
+    for name in ("protagonist-aura", "protagonist-refresh"):
+        aura = actions.add_parser(name, help="选择或刷新指定侧光环")
+        aura.add_argument("--option", type=int, choices=(1, 2), required=True)
     click = actions.add_parser("click", help="按截图像素坐标单击一次并重新截图")
     click.add_argument("--x", type=int, required=True)
     click.add_argument("--y", type=int, required=True)
@@ -54,6 +71,11 @@ def main():
     move = actions.add_parser("move", help="在备战槽位之间拖动，结果需检查截图")
     move.add_argument("--from", dest="source", required=True, help="来源槽位，如 bench_1")
     move.add_argument("--to", dest="target", required=True, help="目标槽位，如 front_1")
+    environment = actions.add_parser("environment", help="选择投资环境并点击确认")
+    environment.add_argument("--option", type=int, choices=(1, 2, 3), required=True, help="从左到右的选项编号")
+    for name, help_text in (("strategy", "选择投资策略并确认"), ("strategy-refresh", "刷新指定投资策略一次")):
+        strategy = actions.add_parser(name, help=help_text)
+        strategy.add_argument("--option", type=int, choices=(1, 2, 3), required=True, help="从左到右的选项编号")
     args = parser.parse_args()
     if args.command == "version":
         data = {"result": "success", "version": VERSION}
@@ -63,16 +85,16 @@ def main():
         try:
             if sys.platform != "win32":
                 raise RuntimeError("窗口与运行控制目前仅支持 Windows")
-            import input as game_input
+            from game import input as game_input
             import service
-            from slots import SLOTS
+            from game.slots import SLOTS
 
-            # 防：命令行传入未支持的按键或超出通信时限的拖动时长。
+            # 防：未支持的按键、超出通信时限的拖动时长。
             if args.command == "act" and args.action == "press" and args.key not in game_input.KEYS:
                 parser.error("不支持的按键；支持 escape、enter、space、tab、backspace、方向键、字母和数字")
             if args.command == "act" and args.action == "drag" and not 1 <= args.duration <= 10000:
                 parser.error("拖动时长必须为 1 至 10000 毫秒")
-            # 防：命令行传入商店、无效槽位或相同的起点和终点。
+            # 防：商店槽位、无效槽位或相同起终点。
             if args.command == "act" and args.action == "move" and (
                     args.source not in SLOTS or args.target not in SLOTS or args.source == args.target):
                 parser.error("来源和目标须为不同的备战席、前台或后台槽位")
@@ -91,11 +113,16 @@ def main():
                     raise RuntimeError("服务未启动；请先运行 start --hwnd 窗口句柄")
                 if args.command == "act":
                     fields = {"click": ("x", "y"), "drag": ("from_x", "from_y", "to_x", "to_y", "duration"),
-                              "press": ("key",), "move": ("source", "target")}[args.action]
+                              "press": ("key",), "move": ("source", "target"), "environment": ("option",),
+                              "strategy": ("option",), "strategy-refresh": ("option",), "collect": (),
+                              "start-battle": (), "continue-battle": (), "protagonist-open": (),
+                              "protagonist-confirm": (), "protagonist-character": ("slot",),
+                              "protagonist-aura": ("option",), "protagonist-refresh": ("option",)}[args.action]
                     payload = {field: getattr(args, field) for field in fields}
                     if args.action == "move":
                         payload = {"from": payload["source"], "to": payload["target"]}
-                    data = service.request(args.action, data=payload)
+                    command = "strategy-choose" if args.action == "strategy" else args.action
+                    data = service.request(command, data=payload)
                 else:
                     data = service.request(args.command)
         except ModuleNotFoundError as error:

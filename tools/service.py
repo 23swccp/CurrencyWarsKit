@@ -1,7 +1,7 @@
 """本机常驻服务：保留窗口连接，串行执行操作并保存截图。"""
 
 import argparse
-import input as game_input
+from game import input as game_input
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -94,6 +94,12 @@ class Session:
         self.screenshot_count = 0
         self.error = None
         self.image_size = None
+        self.preparation = None
+        self.preparation_flow = None
+        self.strategy = None
+        self.protagonist = None
+        self.battle = None
+        self.battle_monitor = None
 
     def connect(self):
         from maa.controller import Win32Controller
@@ -123,13 +129,16 @@ class Session:
 
     def status(self):
         with self.metadata_lock:
-            return {
+            result = {
                 "result": "success",
                 "status": "stopping" if self.stopping else "busy" if self.operation else "idle",
                 "pid": os.getpid(), "hwnd": self.hwnd, "title": self.title,
                 "connected": self.controller is not None, "method": self.method,
                 "operation": self.operation, "error": self.error,
             }
+            if self.battle is not None:
+                result["screen"] = self.battle.current()["screen"]
+            return result
 
     def run(self, name, action):
         """串行执行截图和输入。"""
@@ -143,7 +152,7 @@ class Session:
                 self.error = None
             try:
                 data = action()
-            except (OSError, RuntimeError, ModuleNotFoundError, ValueError) as error:
+            except game_input.ERRORS as error:
                 with self.metadata_lock:
                     self.error = str(error)
                 raise
@@ -157,16 +166,165 @@ class Session:
             self.operation_lock.release()
 
     def capture(self):
-        from PIL import Image
-
-        # 防：本次截图失败后，坐标输入继续使用之前的截图尺寸。
+        # 防：本次截图失败后仍沿用旧尺寸发输入。
         self.image_size = None
         job = self.controller.post_screencap().wait()
         if not job.succeeded:
             raise RuntimeError(f"窗口截图失败，截图方式：{self.method}；目标窗口可能已关闭")
-        image = job.get()
-        if image.size == 0:
-            raise RuntimeError("MaaFramework 返回空截图")
+        return self.save_image(job.get())
+
+    def preparation_reader(self):
+        from screens.preparation import Preparation
+
+        if self.preparation is None:
+            self.preparation = Preparation()
+        return self.preparation
+
+    def preparation_frame(self):
+        self.preparation_reader()
+        job = self.controller.post_screencap().wait()
+        # 防：备战观察截图失败。
+        if not job.succeeded:
+            raise RuntimeError("备战截图失败")
+        return job.get()
+
+    def observe_preparation(self):
+        if self.battle is not None and self.battle.current()["screen"] == "战斗":
+            return self.observe_battle()
+        image = self.preparation_frame()
+        reader = self.protagonist_reader()
+        if reader.stage(image) is not None:
+            return self.protagonist_action(image=image)
+        result = self.preparation.recognize(image)
+        if result["result"] != "success":
+            return self.investment_strategy("preparation", image=image)
+        if self.battle is not None:
+            self.battle.begin(result)
+        return {**self.save_image(image), **result}
+
+    def investment_strategy(self, action="read", option=None, image=None):
+        from screens.strategy import StrategyOperation
+
+        operation = StrategyOperation(self, self.strategy_reader())
+        result = operation.execute(action, option, image)
+        if action == "choose" and result["result"] == "success" and result["screen"] == "备战":
+            if self.preparation_flow is None:
+                result = self.enter_preparation(operation.image)
+            else:
+                result = self.preparation_flow.resume(operation.image)
+            result = {**result, "action": "strategy", "option": option}
+        else:
+            result = operation.save(result)
+        if self.battle is not None and result["result"] == "success":
+            self.battle.begin(result)
+        return result
+
+    def strategy_reader(self):
+        from screens.strategy import Strategy
+
+        if self.strategy is None:
+            self.strategy = Strategy()
+        return self.strategy
+
+    def protagonist_reader(self):
+        from screens.protagonist import Protagonist
+
+        if self.protagonist is None:
+            self.protagonist = Protagonist(self.preparation_reader())
+        return self.protagonist
+
+    def protagonist_action(self, action="read", slot=None, option=None, image=None):
+        from screens.protagonist import ProtagonistOperation
+
+        operation = ProtagonistOperation(self, self.protagonist_reader())
+        result = operation.execute(action, slot, option, image)
+        if action == "confirm" and result["result"] == "success" and result["screen"] == "备战":
+            if self.preparation_flow is None:
+                result = self.enter_preparation(operation.image)
+            else:
+                result = self.preparation_flow.resume(operation.image)
+        else:
+            result = operation.save(result)
+        if action != "read":
+            result = {**result, "action": f"protagonist-{action}"}
+            if slot is not None:
+                result["slot"] = slot
+            if option is not None:
+                result["option"] = option
+        if self.battle is not None and result["result"] == "success":
+            self.battle.begin(result)
+        return result
+
+    def enter_preparation(self, image=None, delay=0):
+        from flow.prepare import PreparationFlow
+
+        if self.preparation_flow is None:
+            self.preparation_flow = PreparationFlow(self)
+        result = self.preparation_flow.enter(image, delay)
+        if self.battle is not None:
+            self.battle.begin(result)
+        return result
+
+    def collect_rewards(self):
+        from flow.rewards import collect
+
+        image = self.preparation_frame()
+        page = self.preparation.page(image)
+        if page["result"] != "success":
+            return {**self.save_image(image), **page}
+        return collect(self.controller, self.capture)
+
+    def battle_reader(self):
+        from screens.battle import Battle
+
+        if self.battle is None:
+            self.battle = Battle()
+        return self.battle
+
+    def watch_battle(self):
+        from screens.battle import Monitor
+
+        if self.battle_monitor is None:
+            self.battle_monitor = Monitor(self, self.battle)
+
+    def start_battle(self):
+        from screens.battle import start
+
+        result = start(self, self.battle_reader())
+        if result["result"] == "success" and result["screen"] in {"战斗", "本场结算"}:
+            self.watch_battle()
+        return result
+
+    def observe_battle(self):
+        from screens.battle import capture
+
+        reader = self.battle_reader()
+        state = reader.current()
+        if state.get("action") == "continue-battle":
+            return state
+        image = capture(self.controller)
+        if reader.current()["screen"] == "战斗":
+            result = reader.observe(image)
+        else:
+            result = reader.recognize(image)
+            reader.begin(result)
+        if result["screen"] == "战斗":
+            self.watch_battle()
+        return {**self.save_image(image), **result}
+
+    def finish_battle(self, image):
+        from screens.battle import finish
+
+        return finish(self, self.battle_reader(), image)
+
+    def continue_battle(self):
+        from screens.battle import continue_battle
+
+        return continue_battle(self, self.battle_reader())
+
+    def save_image(self, image):
+        from PIL import Image
+
         path = RUNTIME / "screenshots" / f"{self.screenshot_count + 1}.png"
         Image.fromarray(image[:, :, ::-1]).save(path, format="PNG")
         self.screenshot_count += 1
@@ -177,12 +335,71 @@ class Session:
     def stop(self):
         with self.metadata_lock:
             self.stopping = True
+        if self.battle_monitor is not None:
+            self.battle_monitor.stop()
+
+
+def navigate(session, data):
+    from flow.navigation import Navigator
+
+    return session.run("navigate", lambda: Navigator(session).run())
+
+
+def environment(session, data):
+    from flow.navigation import Navigator
+
+    return session.run("environment", lambda: Navigator(session).run(data["option"]))
+
+
+def strategy(action=None):
+    if action is None:
+        return lambda session, data: session.run("strategy", session.investment_strategy)
+    return lambda session, data: session.run(f"strategy-{action}",
+                                            lambda: session.investment_strategy(action, data["option"]))
+
+
+def protagonist(action=None):
+    if action is None:
+        return lambda session, data: session.run("protagonist", session.protagonist_action)
+    return lambda session, data: session.run(f"protagonist-{action}",
+                                            lambda: session.protagonist_action(action, **data))
+
+
+# 接口路径与处理函数的唯一清单，返回路径即表示接口存在。
+ROUTES = {
+    "/status": lambda session, data: session.status(),
+    "/screenshot": lambda session, data: session.run("screenshot", session.capture),
+    "/resync": lambda session, data: session.run("resync", session.capture),
+    "/click": lambda session, data: session.run("click", lambda: game_input.click(
+        session.controller, session.image_size, session.capture, data["x"], data["y"])),
+    "/drag": lambda session, data: session.run("drag", lambda: game_input.drag(
+        session.controller, session.image_size, session.capture,
+        data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"])),
+    "/press": lambda session, data: session.run("press", lambda: game_input.press(
+        session.controller, session.capture, data["key"])),
+    "/move": lambda session, data: session.run("move", lambda: game_input.move(
+        session.controller, session.image_size, session.capture, data["from"], data["to"])),
+    "/navigate": navigate,
+    "/environment": environment,
+    "/preparation": lambda session, data: session.run("preparation", session.observe_preparation),
+    "/strategy": strategy(),
+    "/strategy-refresh": strategy("refresh"),
+    "/strategy-choose": strategy("choose"),
+    "/protagonist": protagonist(),
+    **{f"/protagonist-{name}": protagonist(name)
+       for name in ("open", "character", "aura", "refresh", "confirm")},
+    "/collect": lambda session, data: session.run("collect", session.collect_rewards),
+    "/start-battle": lambda session, data: session.run("start-battle", session.start_battle),
+    "/battle": lambda session, data: session.run("battle", session.observe_battle),
+    "/prepare": lambda session, data: session.run("prepare", session.enter_preparation),
+    "/continue-battle": lambda session, data: session.run("continue-battle", session.continue_battle),
+}
 
 
 class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
-        self.connection.settimeout(5)  # 不让未发完的本机请求一直阻塞服务退出。
+        self.connection.settimeout(5)  # 防：请求未发完时阻塞服务关闭。
 
     def log_message(self, *args):
         pass  # 常规请求不写访问日志。
@@ -203,33 +420,26 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({"result": "failed", "message": "仅接受 POST JSON 请求"}, 405)
 
     def do_POST(self):
-        if self.path not in {"/status", "/stop", "/screenshot", "/resync", "/click", "/drag", "/press", "/move"}:
+        if self.path == "/stop":
+            self.server.session.stop()
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            self.reply({"result": "success", "status": "stopping"})
+            return
+        route = ROUTES.get(self.path)
+        if route is None:
             self.reply({"result": "failed", "message": "接口不存在"}, 404)
             return
-        data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        session = self.server.session
+        # 防：请求只发了一半或不是 JSON。
         try:
-            if self.path == "/status":
-                result = session.status()
-            elif self.path == "/stop":
-                session.stop()
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
-                result = {"result": "success", "status": "stopping"}
-            elif self.path == "/click":
-                result = session.run("click", lambda: game_input.click(session.controller, session.image_size, session.capture, data["x"], data["y"]))
-            elif self.path == "/drag":
-                result = session.run("drag", lambda: game_input.drag(session.controller, session.image_size, session.capture,
-                                     data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"]))
-            elif self.path == "/press":
-                result = session.run("press", lambda: game_input.press(session.controller, session.capture, data["key"]))
-            elif self.path == "/move":
-                result = session.run("move", lambda: game_input.move(session.controller, session.image_size, session.capture,
-                                     data["from"], data["to"]))
-            else:
-                result = session.run(self.path[1:], session.capture)
+            data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        except (KeyError, ValueError, TimeoutError):
+            self.reply({"result": "failed", "message": "请求体不完整或不是 JSON"}, 400)
+            return
+        try:
+            result = route(self.server.session, data)
         except game_input.InputUncertain as error:
             result = {"result": "uncertain", "message": str(error)}
-        except (OSError, RuntimeError, ModuleNotFoundError, ValueError) as error:
+        except game_input.ERRORS as error:
             result = {"result": "failed", "message": str(error)}
         self.reply(result)
 
@@ -241,12 +451,12 @@ def request(command, info=None, data=None):
         "Content-Type": "application/json",
     })
     try:
-        with build_opener(ProxyHandler({})).open(req, timeout=30) as response:
+        with build_opener(ProxyHandler({})).open(req, timeout=60 if command in {"navigate", "preparation", "strategy", "strategy-refresh", "strategy-choose", "prepare", "continue-battle"} or command.startswith("protagonist") else 30) as response:
             return json.load(response)
     except HTTPError as error:
         raise RuntimeError(f"服务拒绝请求（HTTP {error.code}）") from error
     except (URLError, TimeoutError) as error:
-        raise RuntimeError("服务通信失败或超时；操作可能仍在运行，请查询 status，不要盲目重发") from error
+        raise RuntimeError("服务通信失败或超时；操作可能仍在运行，先用 status 查询状态") from error
 
 
 def start(hwnd, method):
@@ -330,6 +540,10 @@ def serve(args):
                         thread.join()
                     # 等待已接受的请求结束，再销毁连接并释放进程锁。
                     server.server_close()
+                if session.battle_monitor is not None:
+                    session.battle_monitor.close()
+                if session.preparation is not None:
+                    session.preparation.close()
                 session.controller = None
                 INFO.unlink(missing_ok=True)
     except ServiceBusy as error:

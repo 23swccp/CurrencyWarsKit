@@ -16,6 +16,8 @@ from maa.pipeline import JOCR, JRecognitionType
 from maa.resource import Resource
 from maa.tasker import Tasker
 
+MODEL = Path(__file__).resolve().parent / ".runtime" / "ocr-model"
+
 
 class ImageController(CustomController):
     """只提供离线图片，不发送输入。"""
@@ -53,7 +55,7 @@ def memory():
     counters.cb = ctypes.sizeof(counters)
     ctypes.windll.kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     ctypes.windll.psapi.GetProcessMemoryInfo.argtypes = (wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD)
-    # 防：Windows 未能读取当前进程的内存计数。
+    # 防：内存计数读取失败时不出统计。
     if not ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.windll.kernel32.GetCurrentProcess(),
                                                     ctypes.byref(counters), counters.cb):
         raise ctypes.WinError()
@@ -72,7 +74,7 @@ def main():
                         default=(0, 0, 0, 0), help="识别区域，按图片像素指定")
     parser.add_argument("--repeat", type=int, default=1, help="对同一张图片重复识别的次数")
     args = parser.parse_args()
-    # 防：命令行指定非正数次数，无法进行识别。
+    # 防：--repeat 小于 1。
     if args.repeat < 1:
         parser.error("重复次数必须大于零")
 
@@ -82,7 +84,7 @@ def main():
     resource = Resource()
     if not resource.use_cpu():
         raise RuntimeError("无法设置 CPU 推理")
-    # 防：模型文件缺失或与 MaaFramework 不兼容，资源加载失败。
+    # 防：模型文件缺失或与 MaaFramework 不兼容。
     if not resource.post_ocr_model(args.model).wait().succeeded:
         raise RuntimeError(f"OCR 模型加载失败：{args.model}")
     image = np.asarray(Image.open(args.image).convert("RGB"))[:, :, ::-1].copy()
@@ -99,7 +101,7 @@ def main():
         ocr_started = perf_counter()
         job = tasker.post_recognition(JRecognitionType.OCR, JOCR(roi=tuple(args.roi)), image).wait()
         detail = job.get()
-        # 防：识别任务执行失败或未返回识别详情。
+        # 防：识别任务失败或未返回详情。
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:
             raise RuntimeError("OCR 任务未返回识别详情")
         recognition = detail.nodes[0].recognition

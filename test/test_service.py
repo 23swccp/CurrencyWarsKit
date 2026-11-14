@@ -116,6 +116,20 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.send("/unknown")[0], 404)
         self.assertEqual(self.send("/unknown", b"{bad")[0], 404)
 
+    def test_malformed_body_is_rejected_before_dispatch(self):
+        code, data = self.send("/status", body=b"{bad")
+        self.assertEqual(code, 400)
+        self.assertEqual(data["result"], "failed")
+
+    def test_every_cli_command_has_a_route(self):
+        commands = {"status", "stop", "resync", "screenshot", "navigate", "preparation",
+                    "prepare", "strategy", "protagonist", "battle"}
+        actions = {"click", "drag", "press", "move", "collect", "start-battle", "continue-battle",
+                   "environment", "strategy-refresh", "strategy-choose", "protagonist-open",
+                   "protagonist-character", "protagonist-aura", "protagonist-refresh",
+                   "protagonist-confirm"}
+        self.assertEqual({path[1:] for path in service.ROUTES} | {"stop"}, commands | actions)
+
     def test_busy_requests_do_not_capture(self):
         with self.server.session.operation_lock:
             code, data = self.send("/screenshot")
@@ -150,6 +164,84 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(service.request(command, info=self.info),
                              {"result": "success", "screenshot": "fixture.png"})
         self.assertNotIn("state", service.request("status", info=self.info))
+
+    def test_preparation_is_serialized_read_only_observation(self):
+        self.server.session.observe_preparation = Mock(return_value={"screen": "备战", "slots": {"front_1": None}})
+        result = service.request("preparation", info=self.info)
+        self.assertEqual(result["slots"]["front_1"], None)
+        self.assertEqual(result["screen"], "备战")
+        with self.server.session.operation_lock:
+            self.assertEqual(service.request("preparation", info=self.info)["result"], "busy")
+        self.server.session.observe_preparation.assert_called_once_with()
+
+    def test_collect_uses_operation_lock_and_returns_frame(self):
+        self.server.session.collect_rewards = Mock(return_value={"result": "uncertain", "screenshot": "after.png"})
+        result = service.request("collect", info=self.info)
+        self.assertEqual(result["result"], "uncertain")
+        self.assertEqual(result["screenshot"], "after.png")
+        with self.server.session.operation_lock:
+            self.assertEqual(service.request("collect", info=self.info)["result"], "busy")
+        self.server.session.collect_rewards.assert_called_once_with()
+
+    def test_start_battle_is_serialized_and_preserves_uncertain(self):
+        session = self.server.session
+        session.start_battle = Mock(return_value={"result": "uncertain", "screenshot": "latest.png"})
+        result = service.request("start-battle", info=self.info)
+        self.assertEqual(result, {"result": "uncertain", "screenshot": "latest.png"})
+        with session.operation_lock:
+            self.assertEqual(service.request("start-battle", info=self.info)["result"], "busy")
+        session.start_battle.assert_called_once_with()
+
+    def test_battle_observation_is_serialized(self):
+        session = self.server.session
+        session.observe_battle = Mock(return_value={"screen": "战斗", "screenshot": "screens.battle.png"})
+        self.assertEqual(service.request("battle", info=self.info)["screen"], "战斗")
+        with session.operation_lock:
+            self.assertEqual(service.request("battle", info=self.info)["result"], "busy")
+        session.observe_battle.assert_called_once_with()
+
+    def test_strategy_routes_are_serialized(self):
+        session = self.server.session
+        session.investment_strategy = Mock(return_value={"result": "success", "screen": "投资策略", "needs_ai": True})
+        for command, payload, args in (("strategy", {}, ()), ("strategy-refresh", {"option": 2}, ("refresh", 2)),
+                                       ("strategy-choose", {"option": 3}, ("choose", 3))):
+            with self.subTest(command=command):
+                session.investment_strategy.reset_mock()
+                result = service.request(command, info=self.info, data=payload)
+                self.assertTrue(result["needs_ai"])
+                session.investment_strategy.assert_called_once_with(*args)
+                with session.operation_lock:
+                    self.assertEqual(service.request(command, info=self.info, data=payload)["result"], "busy")
+                session.investment_strategy.assert_called_once_with(*args)
+
+    def test_preparation_entry_and_continue_are_serialized(self):
+        session = self.server.session
+        for command, method in (("prepare", "enter_preparation"), ("continue-battle", "continue_battle")):
+            with self.subTest(command=command):
+                operation = Mock(return_value={"result": "uncertain", "screen": "未知", "screenshot": "last.png"})
+                setattr(session, method, operation)
+                result = service.request(command, info=self.info)
+                self.assertEqual(result["result"], "uncertain")
+                self.assertEqual(result["screenshot"], "last.png")
+                with session.operation_lock:
+                    self.assertEqual(service.request(command, info=self.info)["result"], "busy")
+                operation.assert_called_once_with()
+
+    def test_protagonist_routes_are_serialized(self):
+        session = self.server.session
+        session.protagonist_action = Mock(return_value={"result": "success", "screen": "选择主角"})
+        for command, data, args in (("protagonist", {}, ()), ("protagonist-open", {}, ("open",)),
+                                    ("protagonist-character", {"slot": "front_1"}, ("character",)),
+                                    ("protagonist-aura", {"option": 2}, ("aura",)),
+                                    ("protagonist-refresh", {"option": 1}, ("refresh",)),
+                                    ("protagonist-confirm", {}, ("confirm",))):
+            with self.subTest(command=command):
+                session.protagonist_action.reset_mock()
+                self.assertEqual(service.request(command, info=self.info, data=data)["screen"], "选择主角")
+                session.protagonist_action.assert_called_once_with(*args, **data)
+                with session.operation_lock:
+                    self.assertEqual(service.request(command, info=self.info, data=data)["result"], "busy")
+                session.protagonist_action.assert_called_once_with(*args, **data)
 
     def test_click_returns_new_snapshot(self):
         session = self.server.session
@@ -275,6 +367,63 @@ class HttpTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_protagonist_commands_send_intent_and_targets(self):
+        commands = ((["protagonist"], "protagonist", None),
+                    (["act", "protagonist-open"], "protagonist-open", {}),
+                    (["act", "protagonist-character", "--slot", "front_1"], "protagonist-character", {"slot": "front_1"}),
+                    (["act", "protagonist-aura", "--option", "2"], "protagonist-aura", {"option": 2}),
+                    (["act", "protagonist-refresh", "--option", "1"], "protagonist-refresh", {"option": 1}),
+                    (["act", "protagonist-confirm"], "protagonist-confirm", {}))
+        for argv, command, data in commands:
+            with self.subTest(command=command), patch.object(sys, "argv", ["cw", *argv]), \
+                    patch.object(service, "INFO", Mock()), patch("service.request", return_value={"result": "success"}) as request, \
+                    patch("cw.output"):
+                self.assertEqual(cw.main(), 0)
+                request.assert_called_once_with(command, **({} if data is None else {"data": data}))
+
+    def test_protagonist_rejects_bench_slot_and_invalid_side(self):
+        for argv in (["protagonist-character", "--slot", "bench_1"], ["protagonist-aura", "--option", "3"]):
+            with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", "act", *argv]), \
+                    patch("service.request") as request, patch("argparse.ArgumentParser.error", side_effect=ValueError):
+                with self.assertRaises(ValueError):
+                    cw.main()
+                request.assert_not_called()
+
+    def test_preparation_entry_and_continue_send_expected_requests(self):
+        for argv, command, kwargs in ((["prepare"], "prepare", {}),
+                                      (["act", "continue-battle"], "continue-battle", {"data": {}})):
+            with self.subTest(command=command), patch.object(sys, "argv", ["cw", *argv]), \
+                    patch.object(service, "INFO", Mock()), patch("service.request", return_value={"result": "success"}) as request, \
+                    patch("cw.output"):
+                self.assertEqual(cw.main(), 0)
+                request.assert_called_once_with(command, **kwargs)
+
+    def test_battle_sends_observation_request(self):
+        with patch.object(sys, "argv", ["cw", "battle"]), patch.object(service, "INFO", Mock()), \
+                patch.object(cw, "output"), patch.object(service, "request", return_value={"result": "success"}) as request:
+            self.assertEqual(cw.main(), 0)
+        request.assert_called_once_with("battle")
+
+    def test_start_battle_sends_empty_payload(self):
+        with patch.object(sys, "argv", ["cw", "act", "start-battle"]), \
+                patch.object(service, "INFO", Mock()), patch.object(cw, "output"), \
+                patch.object(service, "request", return_value={"result": "success"}) as request:
+            self.assertEqual(cw.main(), 0)
+        request.assert_called_once_with("start-battle", data={})
+
+    def test_strategy_commands_send_intent_and_option(self):
+        for argv, command, payload in ((["strategy"], "strategy", None),
+                                      (["act", "strategy", "--option", "3"], "strategy-choose", {"option": 3}),
+                                      (["act", "strategy-refresh", "--option", "1"], "strategy-refresh", {"option": 1})):
+            with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", *argv]), \
+                    patch.object(service, "INFO", Mock()), patch.object(cw, "output"), \
+                    patch.object(service, "request", return_value={"result": "success"}) as request:
+                self.assertEqual(cw.main(), 0)
+                if payload is None:
+                    request.assert_called_once_with(command)
+                else:
+                    request.assert_called_once_with(command, data=payload)
+
     def test_click_sends_only_coordinates(self):
         with (patch.object(sys, "argv", ["cw", "act", "click", "--x", "1", "--y", "2"]),
               patch.object(service, "INFO", Mock()),
@@ -295,6 +444,9 @@ class CliTests(unittest.TestCase):
             ["move", "--from", "bench_1", "--to", "bench_1"],
             ["move", "--from", "front_5", "--to", "back_1"],
             ["click", "--x", "not-an-int", "--y", "1"],
+            ["strategy", "--option", "0"],
+            ["strategy-refresh", "--option", "4"],
+            ["strategy"],
         ]
         for args in cases:
             with self.subTest(args=args):

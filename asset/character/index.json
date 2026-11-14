@@ -1,0 +1,679 @@
+{
+  "characters": [
+    {
+      "name": "阿格莱雅",
+      "file": "阿格莱雅.png",
+      "box": [
+        24,
+        15,
+        170,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "寒鸦",
+      "file": "寒鸦.png",
+      "box": [
+        198,
+        15,
+        344,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "缇宝",
+      "file": "缇宝.png",
+      "box": [
+        372,
+        15,
+        518,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "风堇",
+      "file": "风堇.png",
+      "box": [
+        546,
+        15,
+        692,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "昔涟",
+      "file": "昔涟.png",
+      "box": [
+        720,
+        15,
+        866,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "镜流",
+      "file": "镜流.png",
+      "box": [
+        894,
+        15,
+        1040,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "赛飞儿",
+      "file": "赛飞儿.png",
+      "box": [
+        1068,
+        15,
+        1214,
+        185
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "遐蝶",
+      "file": "遐蝶.png",
+      "box": [
+        24,
+        259,
+        170,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "白露",
+      "file": "白露.png",
+      "box": [
+        198,
+        259,
+        344,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "花火",
+      "file": "花火.png",
+      "box": [
+        372,
+        259,
+        518,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "知更鸟",
+      "file": "知更鸟.png",
+      "box": [
+        546,
+        259,
+        692,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "星期日",
+      "file": "星期日.png",
+      "box": [
+        720,
+        259,
+        866,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "万敌",
+      "file": "万敌.png",
+      "box": [
+        894,
+        259,
+        1040,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "海瑟音",
+      "file": "海瑟音.png",
+      "box": [
+        1068,
+        259,
+        1214,
+        429
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "那刻夏",
+      "file": "那刻夏.png",
+      "box": [
+        24,
+        503,
+        170,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "刻律德菈",
+      "file": "刻律德菈.png",
+      "box": [
+        198,
+        503,
+        344,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "长夜月",
+      "file": "长夜月.png",
+      "box": [
+        372,
+        503,
+        518,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "火花",
+      "file": "火花.png",
+      "box": [
+        546,
+        503,
+        692,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "星神★阿哈",
+      "file": "星神★阿哈.png",
+      "box": [
+        720,
+        503,
+        866,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "卡芙卡",
+      "file": "卡芙卡.png",
+      "box": [
+        894,
+        503,
+        1040,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "克拉拉",
+      "file": "克拉拉.png",
+      "box": [
+        1068,
+        503,
+        1214,
+        673
+      ],
+      "source": "pebrel-paste-9lPE0W.png"
+    },
+    {
+      "name": "丹恒•饮月",
+      "file": "丹恒•饮月.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        28,
+        19,
+        174,
+        189
+      ]
+    },
+    {
+      "name": "雪衣",
+      "file": "雪衣.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        202,
+        19,
+        348,
+        189
+      ]
+    },
+    {
+      "name": "翡翠",
+      "file": "翡翠.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        376,
+        19,
+        522,
+        189
+      ]
+    },
+    {
+      "name": "白厄",
+      "file": "白厄.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        550,
+        19,
+        696,
+        189
+      ]
+    },
+    {
+      "name": "不死途",
+      "file": "不死途.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        724,
+        19,
+        870,
+        189
+      ]
+    },
+    {
+      "name": "帕姆王",
+      "file": "帕姆王.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        898,
+        19,
+        1044,
+        189
+      ]
+    },
+    {
+      "name": "希露瓦",
+      "file": "希露瓦.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        1072,
+        19,
+        1218,
+        189
+      ]
+    },
+    {
+      "name": "刃",
+      "file": "刃.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        28,
+        263,
+        174,
+        433
+      ]
+    },
+    {
+      "name": "藿藿",
+      "file": "藿藿.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        202,
+        263,
+        348,
+        433
+      ]
+    },
+    {
+      "name": "砂金",
+      "file": "砂金.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        376,
+        263,
+        522,
+        433
+      ]
+    },
+    {
+      "name": "黄泉",
+      "file": "黄泉.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        550,
+        263,
+        696,
+        433
+      ]
+    },
+    {
+      "name": "千冶•刃",
+      "file": "千冶•刃.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        724,
+        263,
+        870,
+        433
+      ]
+    },
+    {
+      "name": "姬子•启行",
+      "file": "姬子•启行.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        898,
+        263,
+        1044,
+        433
+      ]
+    },
+    {
+      "name": "砂金•戏浪",
+      "file": "砂金•戏浪.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        1072,
+        263,
+        1218,
+        433
+      ]
+    },
+    {
+      "name": "罗刹",
+      "file": "罗刹.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        28,
+        507,
+        174,
+        677
+      ]
+    },
+    {
+      "name": "符玄",
+      "file": "符玄.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        202,
+        507,
+        348,
+        677
+      ]
+    },
+    {
+      "name": "椒丘",
+      "file": "椒丘.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        376,
+        507,
+        522,
+        677
+      ]
+    },
+    {
+      "name": "飞霄",
+      "file": "飞霄.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        550,
+        507,
+        696,
+        677
+      ]
+    },
+    {
+      "name": "乱破",
+      "file": "乱破.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        724,
+        507,
+        870,
+        677
+      ]
+    },
+    {
+      "name": "大丽花",
+      "file": "大丽花.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        898,
+        507,
+        1044,
+        677
+      ]
+    },
+    {
+      "name": "交光",
+      "file": "交光.png",
+      "source": "pebrel-paste-1kmdrx.png",
+      "box": [
+        1072,
+        507,
+        1218,
+        677
+      ]
+    },
+    {
+      "name": "银狼LV.999",
+      "file": "银狼LV.999.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        24,
+        19,
+        170,
+        189
+      ]
+    },
+    {
+      "name": "开拓者",
+      "file": "开拓者.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        198,
+        19,
+        344,
+        189
+      ],
+      "display_name": "23"
+    },
+    {
+      "name": "娜塔莎",
+      "file": "娜塔莎.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        372,
+        19,
+        518,
+        189
+      ]
+    },
+    {
+      "name": "云璃",
+      "file": "云璃.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        546,
+        19,
+        692,
+        189
+      ]
+    },
+    {
+      "name": "流萤",
+      "file": "流萤.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        720,
+        19,
+        866,
+        189
+      ]
+    },
+    {
+      "name": "大黑塔",
+      "file": "大黑塔.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        894,
+        19,
+        1040,
+        189
+      ]
+    },
+    {
+      "name": "绯英",
+      "file": "绯英.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        1068,
+        19,
+        1214,
+        189
+      ]
+    },
+    {
+      "name": "知更鸟•晴歌",
+      "file": "知更鸟•晴歌.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        24,
+        263,
+        170,
+        433
+      ]
+    },
+    {
+      "name": "瓦尔特",
+      "file": "瓦尔特.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        198,
+        263,
+        344,
+        433
+      ]
+    },
+    {
+      "name": "托帕&账账",
+      "file": "托帕&账账.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        372,
+        263,
+        518,
+        433
+      ]
+    },
+    {
+      "name": "景元",
+      "file": "景元.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        546,
+        263,
+        692,
+        433
+      ]
+    },
+    {
+      "name": "桂乃芬",
+      "file": "桂乃芬.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        720,
+        263,
+        866,
+        433
+      ]
+    },
+    {
+      "name": "灵砂",
+      "file": "灵砂.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        894,
+        263,
+        1040,
+        433
+      ]
+    },
+    {
+      "name": "三月七",
+      "file": "三月七.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        1068,
+        263,
+        1214,
+        433
+      ]
+    },
+    {
+      "name": "忘归人",
+      "file": "忘归人.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        24,
+        507,
+        170,
+        677
+      ]
+    },
+    {
+      "name": "黑天鹅",
+      "file": "黑天鹅.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        198,
+        507,
+        344,
+        677
+      ]
+    },
+    {
+      "name": "波提欧",
+      "file": "波提欧.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        372,
+        507,
+        518,
+        677
+      ]
+    },
+    {
+      "name": "真珠",
+      "file": "真珠.png",
+      "source": "pebrel-paste-98ZSEz.png",
+      "box": [
+        546,
+        507,
+        692,
+        677
+      ]
+    }
+  ],
+  "sources": {
+    "pebrel-paste-9lPE0W.png": [
+      1251,
+      720
+    ],
+    "pebrel-paste-1kmdrx.png": [
+      1248,
+      732
+    ],
+    "pebrel-paste-98ZSEz.png": [
+      1238,
+      743
+    ]
+  }
+}
