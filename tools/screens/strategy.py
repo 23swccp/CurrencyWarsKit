@@ -9,6 +9,7 @@ from maa.pipeline import JOCR, JRecognitionType
 
 from game.input import ERRORS, InputUncertain, uncertain
 from ocr import ImageController, MODEL
+from recognition_debug import focus
 from screens.preparation import ASSETS, Recognition, layout as preparation_layout
 
 
@@ -22,17 +23,16 @@ INTERVAL = 0.3
 
 
 class Strategy(Recognition):
-    def __init__(self):
+    def __init__(self, preparation):
+        self.preparation = preparation
         self.controller = ImageController(np.zeros((1, 1, 3), dtype="uint8"))
         if not self.controller.post_connection().wait().succeeded:
             raise RuntimeError("投资策略图片控制器连接失败")
         super().__init__(self.controller)
         self.ocr_ready = False
-        for directory, names in (("strategy", ("title", "selected")),
-                                 ("preparation", ("phase", "shop", "icons", "phase_open", "shop_open"))):
-            for name in names:
-                with Image.open(ASSETS / directory / f"{name}.png") as image:
-                    self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
+        for name in ("title", "selected"):
+            with Image.open(ASSETS / "strategy" / f"{name}.png") as image:
+                self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
 
     def page(self, image):
         if image.shape[:2] != (1080, 1920):
@@ -40,6 +40,7 @@ class Strategy(Recognition):
         return self.score(image, "title.png", TITLE) >= 0.9
 
     def text(self, image, roi):
+        focus(image, roi, "投资策略 OCR", "ocr")
         detail = self.tasker.post_recognition(JRecognitionType.OCR, JOCR(roi=roi), image).wait().get()
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:
             raise RuntimeError(f"投资策略 OCR 详情缺失：{roi}")
@@ -73,7 +74,7 @@ class Strategy(Recognition):
                 "selected": self.selected(image), "needs_ai": True}
 
     def following(self, image):
-        result = preparation_layout(image, self.score)
+        result = preparation_layout(image, self.preparation)
         return {**result, "needs_ai": True} if result is not None else None
 
 
@@ -121,6 +122,13 @@ class StrategyOperation:
                     return {**self.observation, "result": "success"}
             elif preparation and frame is not image:
                 # 调用方给的那帧已判过不是备战页，只检查新截图。
+                supply = self.session.supply_reader()
+                if supply.page(frame):
+                    from screens.supply import SupplyOperation
+                    operation = SupplyOperation(self.session, supply)
+                    result = operation.execute(image=frame)
+                    self.image = operation.image
+                    return result
                 protagonist = self.session.protagonist_reader()
                 if protagonist.stage(frame) in {"entry", "selection"}:
                     from screens.protagonist import ProtagonistOperation
@@ -128,7 +136,7 @@ class StrategyOperation:
                 following = self.reader.following(frame)
                 if following is not None:
                     if following["shop"] == "closed":
-                        return {**following, **self.session.preparation.slots(frame)}
+                        return {**following, **self.session.preparation.observe(frame)}
                     return following
             return None
         message = "备战或投资策略界面等待超时" if preparation else "投资策略选项读取超时"

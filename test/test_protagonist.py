@@ -23,14 +23,31 @@ def observation(character=None, selected=None, count=6, gold=46):
 class ProtagonistReaderTests(unittest.TestCase):
     def setUp(self):
         self.reader = Protagonist.__new__(Protagonist)
+        self.reader.preparation = Mock()
+        self.reader.score = Mock(return_value=0.2)
         self.reader.tasker = Mock()
         self.image = np.zeros((1080, 1920, 3), dtype="uint8")
 
-    def test_stage_uses_title_and_entry_without_ocr(self):
-        self.reader.find = Mock(side_effect=[None, Mock()])
-        self.assertEqual(self.reader.stage(self.image), "entry")
-        self.reader.find.side_effect = [Mock()]
+    def test_stage_uses_ocr_mapping_for_entry_and_title_for_selection(self):
+        self.reader.find = Mock(return_value=None)
+        self.reader.preparation.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
+        with patch("screens.protagonist.preparation_page", return_value={"result": "success", "screen": "备战"}):
+            self.assertEqual(self.reader.stage(self.image), "entry")
+        self.assertEqual(self.reader.find.call_count, 1)
+        self.reader.find.return_value = Mock()
+        self.reader.preparation.action_button.reset_mock()
         self.assertEqual(self.reader.stage(self.image), "selection")
+        self.reader.preparation.action_button.assert_not_called()
+
+    def test_unknown_button_or_unconfirmed_preparation_is_not_main_character_entry(self):
+        self.reader.find = Mock(return_value=None)
+        self.reader.preparation.action_button.return_value = {"button_text": "新buff文字", "next_action": None}
+        with patch("screens.protagonist.preparation_page", return_value={"result": "success", "screen": "备战"}):
+            self.assertIsNone(self.reader.stage(self.image))
+        self.reader.preparation.action_button.reset_mock()
+        with patch("screens.protagonist.preparation_page", return_value={"result": "uncertain", "screen": "未知"}):
+            self.assertIsNone(self.reader.stage(self.image))
+        self.reader.preparation.action_button.assert_not_called()
 
     def test_size_checked_before_matching(self):
         self.reader.find = Mock()
@@ -66,6 +83,34 @@ class ProtagonistReaderTests(unittest.TestCase):
         self.image[943:966, 780:800] = 230
         self.assertTrue(self.reader.enabled(self.image))
 
+    def test_following_accepts_any_nonempty_action_button_text(self):
+        self.reader.score = Mock()
+        for text in ("出战", "任意增益修改的文字"):
+            self.reader.preparation.action_button.return_value = {
+                "button_text": text, "next_action": "start-battle" if text == "出战" else None}
+            with self.subTest(text=text), patch("screens.protagonist.preparation_page",
+                                                return_value={"result": "success", "screen": "备战"}):
+                result = self.reader.following(self.image)
+            self.assertEqual(result["button_text"], text)
+            self.assertEqual(result["result"], "success")
+        self.reader.score.assert_not_called()
+
+    def test_following_waits_when_button_text_is_empty(self):
+        self.reader.preparation.action_button.return_value = {"button_text": "", "next_action": None}
+        with patch("screens.protagonist.preparation_page", return_value={"result": "success", "screen": "备战"}):
+            self.assertIsNone(self.reader.following(self.image))
+        self.reader.preparation.action_button.assert_called_once_with(self.image)
+
+    def test_following_does_not_ocr_before_preparation_is_confirmed(self):
+        with patch("screens.protagonist.preparation_page", return_value={"result": "uncertain", "screen": "未知"}):
+            self.assertIsNone(self.reader.following(self.image))
+        self.reader.preparation.action_button.assert_not_called()
+
+    def test_following_does_not_complete_while_known_entry_remains(self):
+        self.reader.preparation.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
+        with patch("screens.protagonist.preparation_page", return_value={"result": "success", "screen": "备战"}):
+            self.assertIsNone(self.reader.following(self.image))
+
 
 class ProtagonistOperationTests(unittest.TestCase):
     def setUp(self):
@@ -80,7 +125,9 @@ class ProtagonistOperationTests(unittest.TestCase):
         self.reader.stage.return_value = "selection"
         self.reader.read.return_value = observation()
         self.reader.following.return_value = None
+        self.reader.preparation.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
         self.reader.refresh_button.return_value = Mock(box=(1524, 758, 66, 30))
+        self.reader.preparation.header.return_value = {"node": "1-9"}
         self.operation = ProtagonistOperation(self.session, self.reader)
         self.sleep = patch("screens.protagonist.sleep").start()
         self.addCleanup(self.sleep.stop)
@@ -103,6 +150,14 @@ class ProtagonistOperationTests(unittest.TestCase):
         self.assertEqual(self.operation.execute("open")["stage"], "selection")
         self.session.controller.post_click.assert_called_once_with(1810, 750)
         self.assertEqual(self.sleep.call_args_list, [call(2), call(2)])
+
+    def test_open_reuses_known_same_frame_entry_without_navigating_again(self):
+        entry = {"result": "success", "screen": "选择主角", "stage": "entry",
+                 "button_text": "选择主角", "next_action": "protagonist-open", "needs_ai": True}
+        self.reader.stage.return_value = "selection"
+        self.assertEqual(self.operation.execute("open", image="entry", observation=entry)["stage"], "selection")
+        self.reader.stage.assert_called_once_with("frame-1")
+        self.session.controller.post_click.assert_called_once_with(1810, 750)
 
     def test_open_timeout_does_not_repeat_click(self):
         self.reader.stage.return_value = "entry"
@@ -175,7 +230,7 @@ class ProtagonistOperationTests(unittest.TestCase):
         self.assertEqual(self.operation.execute("confirm")["result"], "failed")
         self.session.controller.post_click.assert_not_called()
 
-    def test_confirm_waits_for_preparation_and_battle_button(self):
+    def test_confirm_waits_for_preparation_and_action_button_text(self):
         self.reader.read.return_value = observation(character="云璃", selected=1)
         self.reader.following.side_effect = [None, {"result": "success", "screen": "备战"}]
         result = self.operation.execute("confirm")

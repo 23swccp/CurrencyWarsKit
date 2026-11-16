@@ -9,11 +9,11 @@ from maa.pipeline import JOCR, JRecognitionType, JTemplateMatch
 
 from game.input import ERRORS, InputUncertain, uncertain
 from ocr import ImageController, MODEL
+from recognition_debug import focus
 from screens.preparation import ASSETS, Recognition, page as preparation_page
 from game.slots import BLANK, PORTRAIT
 
 
-ENTRY = (1640, 700, 280, 110)
 TITLE = (780, 55, 370, 65)
 TARGET = (960, 445)
 CONFIRM = (960, 954)
@@ -28,6 +28,7 @@ SIDES = ((195, 180, 435, 665), (1290, 180, 435, 665))
 
 
 def portrait(image, rect):
+    focus(image, rect, "主角头像裁剪", "crop")
     x, y, width, height = rect
     card = Image.fromarray(image[y:y + height, x:x + width]).resize((120, 130), Image.Resampling.BICUBIC)
     return np.asarray(card.crop(PORTRAIT)).copy()
@@ -49,11 +50,9 @@ class Protagonist(Recognition):
         for path in (ASSETS / "protagonist").glob("*.png"):
             with Image.open(path) as image:
                 self.resource.override_image(f"protagonist_{path.name}", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
-        for name in ("phase", "shop", "icons", "battle"):
-            with Image.open(ASSETS / "preparation" / f"{name}.png") as image:
-                self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
 
     def find(self, image, name, roi):
+        focus(image, roi, name)
         detail = self.tasker.post_recognition(JRecognitionType.TemplateMatch,
             JTemplateMatch(template=[f"protagonist_{name}.png"], roi=roi, threshold=[0.0], method=5), image).wait().get()
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:
@@ -66,7 +65,8 @@ class Protagonist(Recognition):
             raise ValueError("主角识别要求 1920×1080 截图")
         if self.find(image, "title", TITLE) is not None:
             return "selection"
-        if self.find(image, "entry", ENTRY) is not None:
+        if (preparation_page(image, self.preparation)["result"] == "success"
+                and self.preparation.action_button(image)["next_action"] == "protagonist-open"):
             return "entry"
         return None
 
@@ -75,6 +75,7 @@ class Protagonist(Recognition):
             if not self.resource.use_cpu() or not self.resource.post_ocr_model(MODEL).wait().succeeded:
                 raise RuntimeError(f"主角 OCR 模型加载失败：{MODEL}")
             self.ocr_ready = True
+        focus(image, roi, "主角 OCR", "ocr")
         detail = self.tasker.post_recognition(JRecognitionType.OCR, JOCR(roi=roi), image).wait().get()
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:
             raise RuntimeError(f"主角 OCR 详情缺失：{roi}")
@@ -125,9 +126,12 @@ class Protagonist(Recognition):
                 "gold": int(money) if money.isdecimal() else None}
 
     def following(self, image):
-        result = preparation_page(image, self.score)
-        if result["result"] == "success" and self.score(image, "battle.png", ENTRY) >= 0.9:
-            return result
+        result = preparation_page(image, self.preparation)
+        if result["result"] == "success":
+            button = self.preparation.action_button(image)
+            # 防：返回备战的过场中文字尚未出现，或仍显示未完成的「选择主角」入口。
+            if button["button_text"] and button["next_action"] != "protagonist-open":
+                return {**result, **button}
         return None
 
     def refresh_button(self, image, option):
@@ -170,7 +174,8 @@ class ProtagonistOperation:
             result = self.reader.read(image)
             return {**result, "result": "success" if complete(result) else "uncertain"}
         if stage == "entry":
-            return {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True}
+            return {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True,
+                    **self.reader.preparation.action_button(image), "node": self.reader.preparation.header(image)["node"]}
         return {"result": "uncertain", "screen": "未知", "needs_ai": True}
 
     def wait(self, check, message):
@@ -233,12 +238,12 @@ class ProtagonistOperation:
             if result is not None:
                 return result
             self.observation = self.observe(self.image)
-        return {**self.observation, "result": "uncertain", "message": "主角确认后的备战与出战按钮待核对"}
+        return {**self.observation, "result": "uncertain", "message": "主角确认后的备战与行动按钮文字待核对"}
 
-    def execute(self, action="read", slot=None, option=None, image=None):
+    def execute(self, action="read", slot=None, option=None, image=None, observation=None):
         try:
             self.image = self.capture() if image is None else image
-            result = self.observe(self.image)
+            result = self.observe(self.image) if observation is None else observation
             if action == "open" and result.get("stage") == "entry":
                 self.click((1810, 750))
                 result = self.wait(lambda current: current["result"] == "success" and current.get("stage") == "selection",

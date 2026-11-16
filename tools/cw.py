@@ -41,14 +41,27 @@ def main():
                        default="framepool", help="截图方式；默认 framepool，不自动切换")
     commands.add_parser("screenshot", help="截图到 .runtime/screenshots，返回编号后的文件路径")
     commands.add_parser("navigate", help="进入标准博弈，复位最高职级并开始对局")
-    commands.add_parser("preparation", help="识别备战页面与角色槽位")
+    commands.add_parser("preparation", help="读取备战角色、数值与右侧库存")
     commands.add_parser("prepare", help="进入备战流程，收奖励并返回观察")
     commands.add_parser("strategy", help="读取投资策略选项与单项刷新次数")
+    commands.add_parser("supply", help="读取补给选项、选择计数与可选刷新")
     commands.add_parser("protagonist", help="读取主角候选、光环与刷新费用")
     commands.add_parser("battle", help="观察战斗阶段及当前截图")
+    commands.add_parser("rewards", help="读取最近一次后台补领结果")
+    commands.add_parser("shop", help="读取商店免费次数、刷新费用与金币")
+    overlay = commands.add_parser("overlay", help="开关运行时识别区域显示")
+    overlay.add_argument("state", choices=("on", "off"), help="on 开启，off 关闭")
     act = commands.add_parser("act", help="执行基础输入")
     actions = act.add_subparsers(dest="action", required=True)
     actions.add_parser("collect", help="按住鼠标沿右侧奖励区遍历一轮并截图")
+    actions.add_parser("shop-open", help="打开商店并确认布局")
+    actions.add_parser("shop-close", help="收起商店并确认布局")
+    actions.add_parser("refresh", help="按当前免费次数或费用刷新商店一次")
+    actions.add_parser("supply-refresh", help="有刷新按钮且次数可用时刷新补给一次")
+    supply = actions.add_parser("supply", help="选择一项补给并确认")
+    supply.add_argument("--option", type=int, choices=range(1, 6), required=True, help="从左到右的选项编号")
+    sell = actions.add_parser("sell", help="出售指定备战席角色，确认后排入后台补领")
+    sell.add_argument("--from", dest="source", choices=[f"bench_{i}" for i in range(1, 10)], required=True)
     actions.add_parser("start-battle", help="点击出战一次，最多等待十秒确认战斗")
     actions.add_parser("continue-battle", help="点击继续挑战，等待并进入备战流程")
     actions.add_parser("protagonist-open", help="打开主角选择页")
@@ -111,17 +124,23 @@ def main():
             else:
                 if not service.INFO.exists():
                     raise RuntimeError("服务未启动；请先运行 start --hwnd 窗口句柄")
-                if args.command == "act":
+                if args.command == "overlay":
+                    data = service.request("overlay", data={"enabled": args.state == "on"})
+                elif args.command == "act":
                     fields = {"click": ("x", "y"), "drag": ("from_x", "from_y", "to_x", "to_y", "duration"),
                               "press": ("key",), "move": ("source", "target"), "environment": ("option",),
                               "strategy": ("option",), "strategy-refresh": ("option",), "collect": (),
+                              "supply": ("option",), "supply-refresh": (),
                               "start-battle": (), "continue-battle": (), "protagonist-open": (),
                               "protagonist-confirm": (), "protagonist-character": ("slot",),
-                              "protagonist-aura": ("option",), "protagonist-refresh": ("option",)}[args.action]
+                              "protagonist-aura": ("option",), "protagonist-refresh": ("option",),
+                              "sell": ("source",), "shop-open": (), "shop-close": (), "refresh": ()}[args.action]
                     payload = {field: getattr(args, field) for field in fields}
                     if args.action == "move":
                         payload = {"from": payload["source"], "to": payload["target"]}
-                    command = "strategy-choose" if args.action == "strategy" else args.action
+                    elif args.action == "sell":
+                        payload = {"from": payload["source"]}
+                    command = args.action + "-choose" if args.action in {"strategy", "supply"} else args.action
                     data = service.request(command, data=payload)
                 else:
                     data = service.request(args.command)

@@ -15,6 +15,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
+from recognition_debug import trace
 
 
 RUNTIME = Path(__file__).resolve().parent / ".runtime"
@@ -89,6 +90,8 @@ class Session:
         self.title = None
         self.operation_lock = threading.Lock()
         self.metadata_lock = threading.Lock()
+        self.condition = threading.Condition(self.metadata_lock)
+        self.foreground_waiters = 0
         self.stopping = False
         self.operation = None
         self.screenshot_count = 0
@@ -97,9 +100,12 @@ class Session:
         self.preparation = None
         self.preparation_flow = None
         self.strategy = None
+        self.supply = None
         self.protagonist = None
         self.battle = None
         self.battle_monitor = None
+        self.overlay = None
+        self.collector = None
 
     def connect(self):
         from maa.controller import Win32Controller
@@ -135,23 +141,34 @@ class Session:
                 "pid": os.getpid(), "hwnd": self.hwnd, "title": self.title,
                 "connected": self.controller is not None, "method": self.method,
                 "operation": self.operation, "error": self.error,
+                "overlay": self.overlay is not None,
             }
             if self.battle is not None:
                 result["screen"] = self.battle.current()["screen"]
+            if self.collector is not None:
+                result["collection"] = self.collector.summary()
             return result
 
     def run(self, name, action):
         """串行执行截图和输入。"""
-        if not self.operation_lock.acquire(blocking=False):
-            return {"result": "busy", "message": "正在执行另一个操作"}
+        with self.condition:
+            self.foreground_waiters += 1
+            try:
+                while self.operation == "collect-background":
+                    self.condition.wait()
+                if not self.operation_lock.acquire(blocking=False):
+                    return {"result": "busy", "message": "正在执行另一个操作"}
+            finally:
+                self.foreground_waiters -= 1
+            self.operation = name
         try:
             with self.metadata_lock:
                 if self.stopping:
                     return {"result": "failed", "reason": "stopping", "message": "服务正在停止"}
-                self.operation = name
                 self.error = None
             try:
-                data = action()
+                with trace(None if name == "overlay" else self.overlay):
+                    data = action()
             except game_input.ERRORS as error:
                 with self.metadata_lock:
                     self.error = str(error)
@@ -161,9 +178,24 @@ class Session:
                     return {"result": "failed", "reason": "stopping", "message": "服务正在停止，未发布新观察"}
                 return {"result": "success", **data}
         finally:
-            with self.metadata_lock:
+            with self.condition:
                 self.operation = None
-            self.operation_lock.release()
+                self.operation_lock.release()
+                self.condition.notify_all()
+            if self.collector is not None:
+                self.collector.wake()
+
+    def set_overlay(self, enabled):
+        from overlay import Overlay
+
+        if enabled:
+            if self.overlay is None:
+                self.overlay = Overlay(self.hwnd)
+            self.overlay.check_error()
+        elif self.overlay is not None:
+            overlay, self.overlay = self.overlay, None
+            overlay.close()
+        return {"overlay": enabled}
 
     def capture(self):
         # 防：本次截图失败后仍沿用旧尺寸发输入。
@@ -188,6 +220,56 @@ class Session:
             raise RuntimeError("备战截图失败")
         return job.get()
 
+    def preparation_scene(self, image):
+        from screens.preparation import layout
+
+        reader = self.preparation_reader()
+        if reader.score(image, "armament.png", (940, 20, 190, 80)) >= 0.9:
+            return {"result": "success", "screen": "武装箱选择", "needs_ai": True}
+        if self.protagonist_reader().stage(image) == "selection":
+            return {"result": "success", "screen": "选择主角", "needs_ai": True}
+        if self.strategy_reader().page(image):
+            return {"result": "success", "screen": "投资策略", "needs_ai": True}
+        if self.supply_reader().page(image):
+            return {"result": "success", "screen": "补给", "needs_ai": True}
+        result = layout(image, reader)
+        if result is not None and result["shop"] == "closed":
+            return {**result, **reader.action_button(image)}
+        return result if result is not None else {"result": "uncertain", "screen": "未知", "needs_ai": True}
+
+    def sell_character(self, source):
+        from screens.sell import sell
+        from flow.rewards import Collector
+
+        result = sell(self, source)
+        if result["result"] == "success":
+            if self.collector is None:
+                self.collector = Collector(self)
+            self.collector.request()
+            result = {**result, "collection": {"state": "waiting", "pending": True}}
+        return result
+
+    def shop(self, target):
+        from screens.shop import switch
+
+        return switch(self, target)
+
+    def observe_shop(self):
+        from screens.shop import observe
+
+        return observe(self)
+
+    def refresh_shop(self):
+        from screens.shop import refresh
+
+        return refresh(self)
+
+    def observe_rewards(self):
+        with self.metadata_lock:
+            if self.collector is None:
+                return {"result": "success", "collection": {"state": "idle", "pending": False}}
+            return {"result": "success", **(self.collector.latest or {}), "collection": self.collector.summary()}
+
     def observe_preparation(self):
         if self.battle is not None and self.battle.current()["screen"] == "战斗":
             return self.observe_battle()
@@ -195,8 +277,10 @@ class Session:
         reader = self.protagonist_reader()
         if reader.stage(image) is not None:
             return self.protagonist_action(image=image)
+        if self.supply_reader().page(image):
+            return self.supply_action(image=image)
         result = self.preparation.recognize(image)
-        if result["result"] != "success":
+        if result["result"] != "success" and result["screen"] != "备战":
             return self.investment_strategy("preparation", image=image)
         if self.battle is not None:
             self.battle.begin(result)
@@ -223,8 +307,35 @@ class Session:
         from screens.strategy import Strategy
 
         if self.strategy is None:
-            self.strategy = Strategy()
+            self.strategy = Strategy(self.preparation_reader())
         return self.strategy
+
+    def supply_reader(self):
+        from screens.supply import Supply
+
+        if self.supply is None:
+            self.supply = Supply(self.preparation_reader())
+        return self.supply
+
+    def supply_action(self, action="read", option=None, image=None):
+        from screens.supply import SupplyOperation
+
+        operation = SupplyOperation(self, self.supply_reader())
+        result = operation.execute(action, option, image)
+        if action == "choose" and result["result"] == "success" and result["screen"] == "备战":
+            if self.preparation_flow is None:
+                result = self.enter_preparation(operation.image)
+            else:
+                result = self.preparation_flow.resume(operation.image)
+        else:
+            result = operation.save(result)
+        if action != "read":
+            result = {**result, "action": "supply" if action == "choose" else "supply-refresh"}
+            if option is not None:
+                result["option"] = option
+        if self.battle is not None and result["result"] == "success":
+            self.battle.begin(result)
+        return result
 
     def protagonist_reader(self):
         from screens.protagonist import Protagonist
@@ -258,6 +369,8 @@ class Session:
     def enter_preparation(self, image=None, delay=0):
         from flow.prepare import PreparationFlow
 
+        if self.collector is not None:
+            self.collector.cancel()
         if self.preparation_flow is None:
             self.preparation_flow = PreparationFlow(self)
         result = self.preparation_flow.enter(image, delay)
@@ -269,9 +382,9 @@ class Session:
         from flow.rewards import collect
 
         image = self.preparation_frame()
-        page = self.preparation.page(image)
-        if page["result"] != "success":
-            return {**self.save_image(image), **page}
+        page = self.preparation_scene(image)
+        if page["screen"] != "备战" or page["shop"] != "closed":
+            return {**self.save_image(image), **page, "result": "uncertain", "needs_ai": True}
         return collect(self.controller, self.capture)
 
     def battle_reader(self):
@@ -292,6 +405,8 @@ class Session:
 
         result = start(self, self.battle_reader())
         if result["result"] == "success" and result["screen"] in {"战斗", "本场结算"}:
+            if self.collector is not None:
+                self.collector.cancel()
             self.watch_battle()
         return result
 
@@ -337,6 +452,8 @@ class Session:
             self.stopping = True
         if self.battle_monitor is not None:
             self.battle_monitor.stop()
+        if self.collector is not None:
+            self.collector.stop()
 
 
 def navigate(session, data):
@@ -368,6 +485,9 @@ def protagonist(action=None):
 # 接口路径与处理函数的唯一清单，返回路径即表示接口存在。
 ROUTES = {
     "/status": lambda session, data: session.status(),
+    "/rewards": lambda session, data: session.observe_rewards(),
+    "/shop": lambda session, data: session.run("shop", session.observe_shop),
+    "/overlay": lambda session, data: session.run("overlay", lambda: session.set_overlay(data["enabled"])),
     "/screenshot": lambda session, data: session.run("screenshot", session.capture),
     "/resync": lambda session, data: session.run("resync", session.capture),
     "/click": lambda session, data: session.run("click", lambda: game_input.click(
@@ -379,12 +499,20 @@ ROUTES = {
         session.controller, session.capture, data["key"])),
     "/move": lambda session, data: session.run("move", lambda: game_input.move(
         session.controller, session.image_size, session.capture, data["from"], data["to"])),
+    "/sell": lambda session, data: session.run("sell", lambda: session.sell_character(data["from"])),
+    "/shop-open": lambda session, data: session.run("shop-open", lambda: session.shop("open")),
+    "/shop-close": lambda session, data: session.run("shop-close", lambda: session.shop("closed")),
+    "/refresh": lambda session, data: session.run("refresh", session.refresh_shop),
     "/navigate": navigate,
     "/environment": environment,
     "/preparation": lambda session, data: session.run("preparation", session.observe_preparation),
     "/strategy": strategy(),
     "/strategy-refresh": strategy("refresh"),
     "/strategy-choose": strategy("choose"),
+    "/supply": lambda session, data: session.run("supply", session.supply_action),
+    "/supply-refresh": lambda session, data: session.run("supply-refresh", lambda: session.supply_action("refresh")),
+    "/supply-choose": lambda session, data: session.run("supply-choose",
+        lambda: session.supply_action("choose", data["option"])),
     "/protagonist": protagonist(),
     **{f"/protagonist-{name}": protagonist(name)
        for name in ("open", "character", "aura", "refresh", "confirm")},
@@ -447,11 +575,18 @@ class Handler(BaseHTTPRequestHandler):
 def request(command, info=None, data=None):
     if info is None:
         info = json.loads(INFO.read_text(encoding="utf-8"))
-    req = Request(f"http://127.0.0.1:{info['port']}/{command}", data=json.dumps(data if data is not None else {}).encode("utf-8"), headers={
-        "Content-Type": "application/json",
-    })
+    req = Request(
+        f"http://127.0.0.1:{info['port']}/{command}",
+        data=json.dumps(data if data is not None else {}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    timeout = 60 if (
+        command in {"navigate", "preparation", "strategy", "strategy-refresh",
+                    "strategy-choose", "prepare", "continue-battle"}
+        or command.startswith(("protagonist", "supply"))
+    ) else 30
     try:
-        with build_opener(ProxyHandler({})).open(req, timeout=60 if command in {"navigate", "preparation", "strategy", "strategy-refresh", "strategy-choose", "prepare", "continue-battle"} or command.startswith("protagonist") else 30) as response:
+        with build_opener(ProxyHandler({})).open(req, timeout=timeout) as response:
             return json.load(response)
     except HTTPError as error:
         raise RuntimeError(f"服务拒绝请求（HTTP {error.code}）") from error
@@ -542,10 +677,16 @@ def serve(args):
                     server.server_close()
                 if session.battle_monitor is not None:
                     session.battle_monitor.close()
+                if session.collector is not None:
+                    session.collector.close()
                 if session.preparation is not None:
                     session.preparation.close()
-                session.controller = None
-                INFO.unlink(missing_ok=True)
+                try:
+                    if session.overlay is not None:
+                        session.overlay.close()
+                finally:
+                    session.controller = None
+                    INFO.unlink(missing_ok=True)
     except ServiceBusy as error:
         write_json(ready, {"result": "busy", "message": str(error)})
     except (OSError, RuntimeError, ModuleNotFoundError) as error:

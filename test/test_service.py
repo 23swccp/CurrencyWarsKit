@@ -11,7 +11,7 @@ import sys
 from tempfile import TemporaryDirectory
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import service
 import cw
@@ -123,11 +123,11 @@ class HttpTests(unittest.TestCase):
 
     def test_every_cli_command_has_a_route(self):
         commands = {"status", "stop", "resync", "screenshot", "navigate", "preparation",
-                    "prepare", "strategy", "protagonist", "battle"}
+                    "prepare", "strategy", "supply", "protagonist", "battle", "overlay", "rewards", "shop"}
         actions = {"click", "drag", "press", "move", "collect", "start-battle", "continue-battle",
                    "environment", "strategy-refresh", "strategy-choose", "protagonist-open",
                    "protagonist-character", "protagonist-aura", "protagonist-refresh",
-                   "protagonist-confirm"}
+                   "protagonist-confirm", "sell", "shop-open", "shop-close", "refresh", "supply-refresh", "supply-choose"}
         self.assertEqual({path[1:] for path in service.ROUTES} | {"stop"}, commands | actions)
 
     def test_busy_requests_do_not_capture(self):
@@ -136,6 +136,49 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(data["result"], "busy")
         self.server.session.capture.assert_not_called()
+
+    def test_sell_and_shop_requests_use_the_serial_operation_boundary(self):
+        session = self.server.session
+        session.sell_character = Mock(return_value={"result": "success", "action": "sell"})
+        self.assertEqual(service.request("sell", info=self.info, data={"from": "bench_8"})["result"], "success")
+        session.sell_character.assert_called_once_with("bench_8")
+        session.shop = Mock(return_value={"result": "success", "screen": "备战"})
+        for command, target in (("shop-open", "open"), ("shop-close", "closed")):
+            service.request(command, info=self.info)
+            session.shop.assert_called_with(target)
+        with session.operation_lock:
+            self.assertEqual(service.request("sell", info=self.info, data={"from": "bench_8"})["result"], "busy")
+        self.assertEqual(session.sell_character.call_count, 1)
+
+    def test_rewards_query_reads_background_result_while_input_is_locked(self):
+        self.server.session.observe_rewards = Mock(return_value={"result": "success", "gold": 80,
+                                                                "collection": {"state": "done", "pending": False}})
+        with self.server.session.operation_lock:
+            self.assertEqual(service.request("rewards", info=self.info)["gold"], 80)
+        self.server.session.capture.assert_not_called()
+
+    def test_shop_read_and_refresh_are_serialized(self):
+        session = self.server.session
+        session.observe_shop = Mock(return_value={"result": "success", "refresh_mode": "free", "free_refreshes": 1})
+        self.assertEqual(service.request("shop", info=self.info)["free_refreshes"], 1)
+        session.refresh_shop = Mock(return_value={"result": "success", "action": "refresh"})
+        self.assertEqual(service.request("refresh", info=self.info)["result"], "success")
+        with session.operation_lock:
+            self.assertEqual(service.request("refresh", info=self.info)["result"], "busy")
+        session.refresh_shop.assert_called_once()
+
+    def test_supply_read_refresh_and_choice_use_operation_lock(self):
+        session = self.server.session
+        session.supply_action = Mock(return_value={"result": "success", "screen": "补给"})
+        for command, data, expected in (("supply", {}, call()),
+                                        ("supply-refresh", {}, call("refresh")),
+                                        ("supply-choose", {"option": 4}, call("choose", 4))):
+            with self.subTest(command=command):
+                self.assertEqual(service.request(command, info=self.info, data=data)["screen"], "补给")
+                self.assertEqual(session.supply_action.call_args, expected)
+                with session.operation_lock:
+                    self.assertEqual(service.request(command, info=self.info, data=data)["result"], "busy")
+        self.assertEqual(session.supply_action.call_count, 3)
 
     def test_stop_is_accepted_while_capture_is_running(self):
         entered, release = threading.Event(), threading.Event()
@@ -166,10 +209,13 @@ class HttpTests(unittest.TestCase):
         self.assertNotIn("state", service.request("status", info=self.info))
 
     def test_preparation_is_serialized_read_only_observation(self):
-        self.server.session.observe_preparation = Mock(return_value={"screen": "备战", "slots": {"front_1": None}})
+        self.server.session.observe_preparation = Mock(return_value={"screen": "备战", "slots": {"front_1": None},
+            "node": "3-4", "phase_box": [430, 33, 80, 24]})
         result = service.request("preparation", info=self.info)
         self.assertEqual(result["slots"]["front_1"], None)
         self.assertEqual(result["screen"], "备战")
+        self.assertEqual(result["node"], "3-4")
+        self.assertEqual(result["phase_box"], [430, 33, 80, 24])
         with self.server.session.operation_lock:
             self.assertEqual(service.request("preparation", info=self.info)["result"], "busy")
         self.server.session.observe_preparation.assert_called_once_with()
@@ -367,6 +413,30 @@ class HttpTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_supply_commands_send_intent_and_option(self):
+        for argv, command, kwargs in ((["supply"], "supply", {}),
+                                      (["act", "supply", "--option", "4"], "supply-choose", {"data": {"option": 4}}),
+                                      (["act", "supply-refresh"], "supply-refresh", {"data": {}})):
+            with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", *argv]), \
+                    patch.object(service, "INFO", Mock()), patch("cw.output"), \
+                    patch("service.request", return_value={"result": "success"}) as request:
+                self.assertEqual(cw.main(), 0)
+                request.assert_called_once_with(command, **kwargs)
+
+    def test_sell_shop_and_rewards_send_expected_requests(self):
+        cases = ((["act", "sell", "--from", "bench_8"], "sell", {"data": {"from": "bench_8"}}),
+                 (["act", "shop-open"], "shop-open", {"data": {}}),
+                 (["act", "shop-close"], "shop-close", {"data": {}}),
+                 (["shop"], "shop", {}),
+                 (["act", "refresh"], "refresh", {"data": {}}),
+                 (["rewards"], "rewards", {}))
+        for argv, command, kwargs in cases:
+            with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", *argv]), \
+                    patch.object(service, "INFO", Mock()), patch("cw.output"), \
+                    patch("service.request", return_value={"result": "success"}) as request:
+                self.assertEqual(cw.main(), 0)
+                request.assert_called_once_with(command, **kwargs)
+
     def test_protagonist_commands_send_intent_and_targets(self):
         commands = ((["protagonist"], "protagonist", None),
                     (["act", "protagonist-open"], "protagonist-open", {}),
@@ -435,6 +505,10 @@ class CliTests(unittest.TestCase):
     def test_invalid_arguments_are_rejected_at_cli(self):
         cli = Path(__file__).resolve().parent.parent / "tools" / "cw.py"
         cases = [
+            ["supply", "--option", "0"],
+            ["supply", "--option", "6"],
+            ["sell", "--from", "front_1"],
+            ["sell", "--from", "bench_10"],
             ["press", "--key", "unknown"],
             ["drag", "--from-x", "0", "--from-y", "0", "--to-x", "1", "--to-y", "1",
              "--duration", "0"],

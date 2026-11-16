@@ -14,6 +14,7 @@ from service import Session
 class BattleReaderTests(unittest.TestCase):
     def setUp(self):
         self.reader = Battle.__new__(Battle)
+        self.preparation = Mock()
         self.image = np.zeros((1080, 1920, 3), dtype="uint8")
 
     def scores(self, **values):
@@ -44,18 +45,41 @@ class BattleReaderTests(unittest.TestCase):
             self.reader.recognize(self.image[:720, :1280])
         self.reader.score.assert_not_called()
 
-    def test_preparation_failure_stops_before_button_match(self):
+    def test_preparation_failure_stops_before_button_ocr(self):
         self.reader.score = Mock()
         with patch("screens.battle.preparation_page", return_value={"result": "uncertain", "screen": "未知"}):
-            self.assertEqual(self.reader.ready(self.image)["result"], "failed")
+            self.assertEqual(self.reader.ready(self.image, self.preparation)["result"], "failed")
         self.reader.score.assert_not_called()
+        self.preparation.action_button.assert_not_called()
 
     def test_start_button_requires_visible_text(self):
-        self.reader.score = Mock(return_value=0.89)
+        self.reader.score = Mock()
+        self.preparation.action_button.return_value = {"button_text": "", "next_action": None}
         with patch("screens.battle.preparation_page", return_value={"result": "success", "screen": "备战"}):
-            result = self.reader.ready(self.image)
+            result = self.reader.ready(self.image, self.preparation)
         self.assertEqual(result["result"], "failed")
-        self.assertEqual(result["anchors"], {"button": 0.89})
+        self.assertEqual(result["button_text"], "")
+        self.reader.score.assert_not_called()
+        self.preparation.action_button.assert_called_once_with(self.image)
+
+    def test_buff_button_names_do_not_need_templates_or_a_name_list(self):
+        self.reader.score = Mock()
+        for text in ("出战", "任意增益修改的文字", "Go!"):
+            self.preparation.action_button.return_value = {
+                "button_text": text, "next_action": "start-battle" if text == "出战" else None}
+            with self.subTest(text=text), patch("screens.battle.preparation_page",
+                                                return_value={"result": "success", "screen": "备战"}):
+                result = self.reader.ready(self.image, self.preparation)
+            self.assertEqual(result["result"], "success")
+            self.assertEqual(result["button_text"], text)
+        self.reader.score.assert_not_called()
+
+    def test_known_main_character_entry_is_not_clicked_as_battle(self):
+        self.preparation.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
+        with patch("screens.battle.preparation_page", return_value={"result": "success", "screen": "备战"}):
+            result = self.reader.ready(self.image, self.preparation)
+        self.assertEqual(result["result"], "failed")
+        self.assertEqual(result["next_action"], "protagonist-open")
 
     def test_image_controller_connection_failure_is_reported(self):
         with patch("screens.battle.ImageController") as controller:
@@ -100,6 +124,7 @@ class BattleOperationTests(unittest.TestCase):
         self.sleep.assert_called_once_with(2)
         self.session.controller.post_click.assert_called_once_with(*START)
         self.session.save_image.assert_called_once_with("frame-2")
+        self.reader.ready.assert_called_once_with("frame-1", self.session.preparation_reader.return_value)
 
     def test_timeout_stops_at_ten_seconds_with_five_checks(self):
         result = start(self.session, self.reader)
@@ -156,6 +181,13 @@ class BattleOperationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "截图失败"):
             start(self.session, self.reader)
         self.session.controller.post_click.assert_not_called()
+
+    def test_button_ocr_error_before_click_propagates_without_input(self):
+        self.reader.ready.side_effect = RuntimeError("备战 OCR 详情缺失：右侧行动按钮")
+        with self.assertRaisesRegex(RuntimeError, "OCR 详情缺失"):
+            start(self.session, self.reader)
+        self.session.controller.post_click.assert_not_called()
+        self.reader.recognize.assert_not_called()
 
     def test_capture_failure_after_click_is_uncertain(self):
         self.job.get.side_effect = ["before", RuntimeError("截图数据出错")]
@@ -324,6 +356,30 @@ class MonitorTests(unittest.TestCase):
         self.assertTrue(self.session.operation_lock.acquire(blocking=False))
         self.session.operation_lock.release()
 
+    def test_monitor_release_wakes_only_waiting_collection(self):
+        self.session.collector = worker = Mock()
+        self.reader.current.return_value = {"screen": "备战"}
+        worker.state = "waiting"
+        self.monitor.tick()
+        worker.wake.assert_called_once()
+        worker.wake.reset_mock()
+        worker.state = "paused"
+        self.monitor.tick()
+        worker.wake.assert_not_called()
+
+    def test_background_recognition_reports_regions_to_enabled_overlay(self):
+        from recognition_debug import focus
+
+        self.session.overlay = observer = Mock()
+        def observe(image):
+            focus(image, (35, 0, 100, 65), "flag.png")
+            return {"screen": "战斗"}
+        self.reader.observe.side_effect = observe
+        self.assertEqual(self.monitor.tick(), 1)
+        observer.mark.assert_called_once_with("frame", (35, 0, 100, 65), "flag.png", "template")
+        observer.begin.assert_called_once()
+        observer.end.assert_called_once()
+
     def test_cli_operation_skips_monitor_capture(self):
         with self.session.operation_lock:
             self.assertEqual(self.monitor.tick(), 2)
@@ -434,6 +490,8 @@ class BattleSessionTests(unittest.TestCase):
 
     def test_preparation_after_settlement_updates_recorded_stage(self):
         session = Session(1, "framepool")
+        session.supply = Mock()
+        session.supply.page.return_value = False
         session.protagonist = Mock()
         session.protagonist.stage.return_value = None
         session.battle = Mock()

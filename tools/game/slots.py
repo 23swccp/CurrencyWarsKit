@@ -1,4 +1,4 @@
-"""1920×1080 商店收起时的备战槽位中心坐标。"""
+"""1920×1080 商店收起时的备战布局。"""
 
 CENTERS = {
     "front": ((746, 398), (888, 398), (1031, 398), (1176, 398)),
@@ -25,13 +25,26 @@ CARD_SIZE = (120, 130)
 PORTRAIT = (14, 38, 82, 92)
 EMPTY = {slot: (x - 17, y - 25, 34, 50) for slot, (x, y) in SLOTS.items()}
 
-PHASE = (430, 35, 80, 23)
+HEADER = (220, 20, 320, 115)
+PHASE = (424, 28, 96, 32)
+NODE = (425, 58, 90, 42)
 SHOP = (1520, 800, 220, 260)
 ICONS = (1540, 0, 380, 110)
-PHASE_OPEN = (235, 50, 110, 45)
+PHASE_OPEN = (235, 50, 110, 40)
+NODE_OPEN = (245, 88, 95, 42)
 SHOP_OPEN = (1575, 950, 110, 65)
 SHOP_TOGGLE = (1622, 980)
 BLANK = (1910, 1070)
+ACTION_BUTTON = (1700, 710, 210, 90)
+BENCH_WARNING = (775, 515, 400, 40)
+
+NUMBERS = {
+    "gold": (1635, 897, 58, 48),
+    "level": (255, 881, 94, 53),
+    "experience": (250, 935, 96, 33),
+    "experience_cost": (302, 975, 38, 36),
+    "deployment": (891, 231, 165, 64),
+}
 
 REWARD_START = (12, 12)
 REWARD_CORNERS = (

@@ -8,11 +8,11 @@ from PIL import Image
 
 from game.input import ERRORS, InputUncertain, uncertain
 from ocr import ImageController
+from recognition_debug import trace
 from screens.preparation import ASSETS, Recognition, page as preparation_page
 
 
 START = (1810, 750)
-BUTTON = (1640, 700, 280, 110)
 INTRO = (830, 320, 185, 80)
 FLAG = (35, 0, 100, 65)
 CONTINUE = (740, 830, 440, 130)
@@ -33,21 +33,24 @@ class Battle(Recognition):
         self.state_lock = Lock()
         self.state = {"result": "uncertain", "screen": "未知", "needs_ai": True}
         self.check_after = None
-        for directory, names in (("preparation", ("phase", "shop", "icons", "battle")),
-                                 ("battle", ("intro", "flag", "continue"))):
-            for name in names:
-                with Image.open(ASSETS / directory / f"{name}.png") as image:
-                    self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
+        for name in ("intro", "flag", "continue"):
+            with Image.open(ASSETS / "battle" / f"{name}.png") as image:
+                self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
 
-    def ready(self, image):
-        page = preparation_page(image, self.score)
+    def ready(self, image, preparation):
+        page = preparation_page(image, preparation)
         if page["result"] != "success":
             return {**page, "result": "failed", "message": "出战前备战页面待确认"}
-        score = self.score(image, "battle.png", BUTTON)
-        if score < MIN_SCORE:
-            return {"result": "failed", "screen": "备战", "anchors": {"button": round(score, 3)},
-                    "message": "出战按钮待确认"}
-        return page
+        button = preparation.action_button(image)
+        # 防：右侧行动按钮未读到文字，停止点击；buff 改名后的非空文字同样接受。
+        if not button["button_text"]:
+            return {**page, **button, "result": "failed",
+                    "message": "右侧行动按钮文字待确认"}
+        # 防：已知「选择主角」入口会打开选择页，不能作为出战执行。
+        if button["next_action"] == "protagonist-open":
+            return {**page, **button, "result": "failed", "needs_ai": True,
+                    "message": "当前入口为选择主角，请先完成主角选择"}
+        return {**page, **button}
 
     def recognize(self, image):
         check_size(image)
@@ -119,7 +122,7 @@ def capture(controller):
 
 def start(session, reader):
     image = capture(session.controller)
-    result = reader.ready(image)
+    result = reader.ready(image, session.preparation_reader())
     if result["result"] != "success":
         return {**session.save_image(image), **result, "action": "start-battle"}
     try:
@@ -192,14 +195,15 @@ class Monitor:
             screen = self.reader.current()["screen"]
             if screen not in {"战斗", "本场结算"}:
                 return INTERVAL
-            image = capture(self.session.controller)
-            result = self.reader.observe(image) if screen == "战斗" else self.reader.recognize(image)
-            if screen == "本场结算":
-                self.reader.begin(result)
-            if result["screen"] == "本场结算":
-                with self.session.metadata_lock:
-                    self.session.operation = "continue-battle"
-                self.session.finish_battle(image)
+            with trace(self.session.overlay):
+                image = capture(self.session.controller)
+                result = self.reader.observe(image) if screen == "战斗" else self.reader.recognize(image)
+                if screen == "本场结算":
+                    self.reader.begin(result)
+                if result["screen"] == "本场结算":
+                    with self.session.metadata_lock:
+                        self.session.operation = "continue-battle"
+                    self.session.finish_battle(image)
             return self.reader.next_delay() if result["screen"] == "战斗" else INTERVAL
         except (OSError, RuntimeError, ValueError) as error:
             message = self.reader.fail(error)
@@ -210,6 +214,11 @@ class Monitor:
             with self.session.metadata_lock:
                 self.session.operation = None
             self.session.operation_lock.release()
+            if self.session.collector is not None:
+                with self.session.metadata_lock:
+                    waiting = self.session.collector.state == "waiting"
+                if waiting:
+                    self.session.collector.wake()
 
     def run(self):
         delay = INTERVAL

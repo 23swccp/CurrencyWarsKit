@@ -72,12 +72,12 @@ class RewardTests(unittest.TestCase):
         session.controller = self.controller
         session.preparation_frame = Mock(return_value="frame")
         session.preparation = Mock()
-        session.preparation.page.return_value = {"result": "uncertain", "screen": "未知"}
+        session.preparation_scene = Mock(return_value={"result": "uncertain", "screen": "未知"})
         session.save_image = Mock(return_value={"screenshot": "before.png"})
         result = session.collect_rewards()
         self.assertEqual(result["screenshot"], "before.png")
         self.assertEqual(result["result"], "uncertain")
-        session.preparation.page.assert_called_once_with("frame")
+        session.preparation_scene.assert_called_once_with("frame")
         self.controller.post_touch_down.assert_not_called()
 
     def test_collect_confirms_page_without_matching_characters(self):
@@ -85,10 +85,10 @@ class RewardTests(unittest.TestCase):
         session.controller = self.controller
         session.preparation_frame = Mock(return_value="frame")
         session.preparation = Mock()
-        session.preparation.page.return_value = {"result": "success", "screen": "备战"}
+        session.preparation_scene = Mock(return_value={"result": "success", "screen": "备战", "shop": "closed"})
         with patch("flow.rewards.collect", return_value={"result": "uncertain"}) as action:
             session.collect_rewards()
-        session.preparation.page.assert_called_once_with("frame")
+        session.preparation_scene.assert_called_once_with("frame")
         session.preparation.recognize.assert_not_called()
         action.assert_called_once_with(self.controller, session.capture)
 

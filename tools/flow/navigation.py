@@ -7,6 +7,7 @@ from maa.resource import Resource
 from maa.tasker import Tasker
 
 from ocr import MODEL
+from recognition_debug import focus
 
 # 1920×1080 画面的点击坐标。
 START = (1590, 973)
@@ -30,7 +31,7 @@ class NavigationStopped(RuntimeError):
 
 class Navigator:
     def __init__(self, session):
-        from screens.environment import Equipment
+        from game.equipment import Equipment
         self.session = session
         self.clicked = False
         self.equipment = Equipment()
@@ -52,6 +53,7 @@ class Navigator:
         return image
 
     def read(self, image, roi):
+        focus(image, roi, "导航 OCR", "ocr")
         detail = self.tasker.post_recognition(JRecognitionType.OCR, JOCR(roi=roi), image).wait().get()
         # 防：OCR 未返回详情，与「没有匹配文字」区分。
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:

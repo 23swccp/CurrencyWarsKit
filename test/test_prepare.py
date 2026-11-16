@@ -29,8 +29,9 @@ class PreparationFlowTests(unittest.TestCase):
         self.job.succeeded = True
         self.job.get.side_effect = [f"frame-{i}" for i in range(1, 20)]
         self.flow = PreparationFlow(self.session)
+        self.flow.supply.page.return_value = False
         self.flow.protagonist.stage.return_value = None
-        self.flow.reader.slots.return_value = {"slots": {"front_1": None}}
+        self.flow.reader.observe.return_value = {"result": "success", "slots": {"front_1": None}, "gold": 31}
         self.flow.strategy.page.return_value = False
         self.layout = patch("flow.prepare.layout", return_value=preparation()).start()
         self.sleep = patch("flow.prepare.sleep").start()
@@ -45,7 +46,8 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["slots"], {"front_1": None})
         self.assertEqual(self.sleep.call_args_list, [call(2), call(2)])
         self.sweep.assert_called_once_with(self.session.controller)
-        self.flow.reader.slots.assert_called_once_with("frame-4")
+        self.flow.reader.observe.assert_called_once_with("frame-4")
+        self.assertEqual(result["gold"], 31)
 
     def test_three_misses_return_last_frame_after_two_blank_clicks(self):
         self.layout.return_value = None
@@ -66,7 +68,7 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(self.session.controller.post_click.call_args_list, [call(*SHOP_TOGGLE), call(*BLANK)])
         self.assertEqual(self.sleep.call_args_list, [call(2), call(2), call(2)])
         self.sweep.assert_called_once()
-        self.flow.reader.slots.assert_called_once_with("frame-5")
+        self.flow.reader.observe.assert_called_once_with("frame-5")
 
     def test_shop_close_timeout_stops_before_collecting(self):
         self.layout.return_value = preparation("open")
@@ -75,7 +77,7 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["screenshot"], "frame-4.png")
         self.session.controller.post_click.assert_called_once_with(*SHOP_TOGGLE)
         self.sweep.assert_not_called()
-        self.flow.reader.slots.assert_not_called()
+        self.flow.reader.observe.assert_not_called()
 
     def test_choice_before_collecting_returns_options_to_ai(self):
         self.layout.return_value = None
@@ -127,7 +129,7 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], "success")
         self.assertEqual(self.sleep.call_args_list, [call(2), call(2), call(4)])
         self.session.controller.post_click.assert_called_once_with(*BLANK)
-        self.flow.reader.slots.assert_called_once_with("frame-4")
+        self.flow.reader.observe.assert_called_once_with("frame-4")
         self.flow.strategy.read.assert_not_called()
 
     def test_strategy_title_stops_wait_clicks_before_reading_text(self):
@@ -161,7 +163,7 @@ class PreparationFlowTests(unittest.TestCase):
         result = self.flow.resume("chosen")
         self.assertEqual(result["screen"], "备战")
         self.sweep.assert_called_once()
-        self.flow.reader.slots.assert_called_once_with("chosen")
+        self.flow.reader.observe.assert_called_once_with("chosen")
         self.assertEqual(result["screenshot"], "chosen.png")
 
     def test_choice_before_collecting_resumes_with_one_sweep(self):
@@ -173,7 +175,7 @@ class PreparationFlowTests(unittest.TestCase):
         result = self.flow.resume("chosen")
         self.assertEqual(result["screen"], "备战")
         self.sweep.assert_called_once()
-        self.flow.reader.slots.assert_called_once_with("frame-2")
+        self.flow.reader.observe.assert_called_once_with("frame-2")
 
     def test_new_entry_starts_a_new_collection_round(self):
         self.flow.enter()
@@ -186,7 +188,7 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], "uncertain")
         self.assertEqual(result["screenshot"], "frame-4.png")
         self.sweep.assert_called_once()
-        self.flow.reader.slots.assert_not_called()
+        self.flow.reader.observe.assert_not_called()
 
     def test_post_collection_open_layout_keeps_slots_pending(self):
         self.layout.side_effect = [preparation(), *[preparation("open")] * 3]
@@ -195,7 +197,7 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["shop"], "open")
         self.sweep.assert_called_once()
         self.session.controller.post_click.assert_not_called()
-        self.flow.reader.slots.assert_not_called()
+        self.flow.reader.observe.assert_not_called()
 
     def test_shop_click_failure_returns_context_and_stops(self):
         self.layout.return_value = preparation("open")
@@ -232,16 +234,20 @@ class PreparationSessionTests(unittest.TestCase):
         session = Mock()
         flow = PreparationFlow(session)
         flow.protagonist.stage.return_value = "entry"
+        entry = {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True,
+                 "button_text": "选择主角", "next_action": "protagonist-open", "node": "1-9"}
+        flow.reader.header.return_value = {"node": "1-9"}
+        flow.reader.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
         session.save_image.side_effect = lambda image: {"screenshot": f"{image}.png"}
         with patch("flow.prepare.ProtagonistOperation") as operation, patch("flow.prepare.sweep") as sweep:
             operation.return_value.execute.return_value = {"result": "success", "screen": "选择主角", "stage": "selection"}
             operation.return_value.image = "options"
             operation.return_value.clicked = True
             result = flow.enter("entry")
-        operation.return_value.execute.assert_called_once_with("open", image="entry")
+        operation.return_value.execute.assert_called_once_with("open", image="entry", observation=entry)
         self.assertEqual(result["screenshot"], "options.png")
         sweep.assert_not_called()
-        flow.reader.slots.assert_not_called()
+        flow.reader.observe.assert_not_called()
 
     def test_main_character_title_stops_blank_clicking_during_wait(self):
         session = Mock()

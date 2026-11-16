@@ -20,6 +20,7 @@ def observation(counts=(1, 1, 1), names=("策略甲", "策略乙", "策略丙"))
 class StrategyReaderTests(unittest.TestCase):
     def setUp(self):
         self.reader = Strategy.__new__(Strategy)
+        self.reader.preparation = Mock()
         self.reader.ocr_ready = True
         self.reader.resource = Mock()
         self.reader.tasker = Mock()
@@ -74,16 +75,18 @@ class StrategyReaderTests(unittest.TestCase):
             self.reader.read(self.image)
 
     def test_open_shop_requires_both_markers(self):
-        self.reader.score = Mock(side_effect=[0.95, 0.95])
+        self.reader.preparation.header.return_value = {"layout": "open", "node": "1-1", "phase_box": [244, 59, 86, 22]}
+        self.reader.preparation.score = Mock(return_value=0.95)
         with patch("screens.preparation.page", return_value={"result": "uncertain"}):
             self.assertEqual(self.reader.following(self.image)["shop"], "open")
-            self.reader.score.side_effect = [0.95, 0.89]
+            self.reader.preparation.score.return_value = 0.89
             self.assertIsNone(self.reader.following(self.image))
 
 
 class StrategyOperationTests(unittest.TestCase):
     def setUp(self):
         self.session = Mock()
+        self.session.supply_reader.return_value.page.return_value = False
         self.session.save_image.side_effect = lambda frame: {"screenshot": f"{frame}.png"}
         self.job = self.session.controller.post_screencap.return_value.wait.return_value
         self.job.succeeded = True
@@ -215,24 +218,38 @@ class StrategyOperationTests(unittest.TestCase):
     def test_preparation_wait_resumes_slots_from_confirmed_frame(self):
         self.reader.page.return_value = False
         self.reader.following.return_value = {"result": "success", "screen": "备战", "shop": "closed"}
-        self.session.preparation.slots.return_value = {"slots": {"front_1": None}}
+        self.session.preparation.observe.return_value = {"result": "success", "slots": {"front_1": None}, "gold": 8}
         self.job.get.return_value = "ready"
         result = self.op.run("preparation", image="initial")
         self.assertEqual(result["slots"], {"front_1": None})
-        self.session.preparation.slots.assert_called_once_with("ready")
+        self.session.preparation.observe.assert_called_once_with("ready")
+        self.assertEqual(result["gold"], 8)
         self.reader.following.assert_called_once_with("ready")
+
+    def test_preparation_wait_dispatches_supply_and_keeps_its_latest_frame(self):
+        self.reader.page.return_value = False
+        self.session.supply_reader.return_value.page.return_value = True
+        with patch("screens.supply.SupplyOperation") as operation:
+            operation.return_value.execute.return_value = {"result": "success", "screen": "补给"}
+            operation.return_value.image = "complete-supply"
+            result = self.op.save(self.op.execute("preparation", image="initial"))
+        operation.return_value.execute.assert_called_once_with(image="frame")
+        self.assertEqual(result["screen"], "补给")
+        self.assertEqual(result["screenshot"], "complete-supply.png")
+        self.reader.following.assert_not_called()
 
 
 class StrategySessionTests(unittest.TestCase):
     def test_reader_is_cached_and_operation_is_fresh(self):
         session = Session(1, "framepool")
+        session.preparation = Mock()
         with patch("screens.strategy.Strategy") as reader, patch("screens.strategy.StrategyOperation") as operation:
             result = {"result": "success", "screen": "投资策略"}
             operation.return_value.execute.return_value = result
             operation.return_value.save.return_value = result
             session.investment_strategy()
             session.investment_strategy("refresh", 2)
-        reader.assert_called_once_with()
+        reader.assert_called_once_with(session.preparation)
         self.assertEqual(operation.call_count, 2)
         operation.return_value.execute.assert_has_calls([call("read", None, None), call("refresh", 2, None)])
 
@@ -240,9 +257,11 @@ class StrategySessionTests(unittest.TestCase):
         session = Session(1, "framepool")
         session.protagonist = Mock()
         session.protagonist.stage.return_value = None
+        session.supply = Mock()
+        session.supply.page.return_value = False
         session.preparation_frame = Mock(return_value="frame")
         session.preparation = Mock()
-        session.preparation.recognize.return_value = {"result": "uncertain"}
+        session.preparation.recognize.return_value = {"result": "uncertain", "screen": "未知"}
         session.investment_strategy = Mock(return_value={"screen": "投资策略"})
         self.assertEqual(session.observe_preparation()["screen"], "投资策略")
         session.investment_strategy.assert_called_once_with("preparation", image="frame")
