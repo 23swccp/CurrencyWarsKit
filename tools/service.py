@@ -101,6 +101,8 @@ class Session:
         self.preparation_flow = None
         self.strategy = None
         self.supply = None
+        self.encounter = None
+        self.armament = None
         self.protagonist = None
         self.battle = None
         self.battle_monitor = None
@@ -221,43 +223,69 @@ class Session:
         return job.get()
 
     def preparation_scene(self, image):
-        from screens.preparation import layout
+        from flow.preparation_scene import identify
 
-        reader = self.preparation_reader()
-        if reader.score(image, "armament.png", (940, 20, 190, 80)) >= 0.9:
-            return {"result": "success", "screen": "武装箱选择", "needs_ai": True}
-        if self.protagonist_reader().stage(image) == "selection":
-            return {"result": "success", "screen": "选择主角", "needs_ai": True}
-        if self.strategy_reader().page(image):
-            return {"result": "success", "screen": "投资策略", "needs_ai": True}
-        if self.supply_reader().page(image):
-            return {"result": "success", "screen": "补给", "needs_ai": True}
-        result = layout(image, reader)
-        if result is not None and result["shop"] == "closed":
-            return {**result, **reader.action_button(image)}
-        return result if result is not None else {"result": "uncertain", "screen": "未知", "needs_ai": True}
+        scene = identify(self, image)
+        if scene is None:
+            return {"result": "uncertain", "screen": "未知", "needs_ai": True}
+        if scene["screen"] == "备战" and scene["shop"] == "closed":
+            return {**scene, **self.preparation_reader().action_button(image)}
+        return scene
+
+    def armament_action(self, action, value):
+        from screens.armament import Armament
+
+        if self.armament is None:
+            self.armament = Armament(self.controller)
+        result = self.armament.execute(self, action, value)
+        if action == "choose" and result["result"] == "success":
+            self.queue_collection(result)
+        return result
 
     def sell_character(self, source):
         from screens.sell import sell
-        from flow.rewards import Collector
-
         result = sell(self, source)
         if result["result"] == "success":
-            if self.collector is None:
-                self.collector = Collector(self)
-            self.collector.request()
-            result = {**result, "collection": {"state": "waiting", "pending": True}}
+            self.queue_collection(result)
         return result
+
+    def queue_collection(self, result):
+        from flow.rewards import Collector
+
+        if self.collector is None:
+            self.collector = Collector(self)
+        self.collector.request()
+        result["collection"] = {"state": "waiting", "pending": True}
+
+    def move_character(self, source, target):
+        from game.slots import SLOTS, SLOTS_BY_BACKSTAGE
+        from screens.preparation import backstage_size
+
+        size, positions = self.image_size, SLOTS
+        if source.startswith("back_") or target.startswith("back_"):
+            image = self.preparation_frame()
+            page = self.preparation_reader().page(image)
+            # 防：展开商店或离开备战后，后台使用不同坐标。
+            if page["result"] != "success":
+                return {**self.save_image(image), **page, "result": "failed", "needs_ai": True,
+                        "message": "后台拖动要求商店收起的备战画面"}
+            count = backstage_size(image)
+            # 防：两套后台布局未分清时，不能用旧坐标拖动。
+            if count is None:
+                return {**self.save_image(image), "result": "uncertain", "screen": "备战", "needs_ai": True,
+                        "message": "后台槽位布局待确认"}
+            size, positions = image.shape[1::-1], SLOTS_BY_BACKSTAGE[count]
+            # 防：CLI 可以接受 back_7，但六格后台没有这一格。
+            if source not in positions or target not in positions:
+                return {**self.save_image(image), "result": "failed", "screen": "备战", "needs_ai": True,
+                        "message": "当前备战布局没有指定的槽位"}
+        return game_input.move(self.controller, size, self.capture, source, target, positions)
 
     def shop(self, target):
         from screens.shop import switch
 
         return switch(self, target)
 
-    def observe_shop(self):
-        from screens.shop import observe
-
-        return observe(self)
 
     def refresh_shop(self):
         from screens.shop import refresh
@@ -270,21 +298,11 @@ class Session:
                 return {"result": "success", "collection": {"state": "idle", "pending": False}}
             return {"result": "success", **(self.collector.latest or {}), "collection": self.collector.summary()}
 
-    def observe_preparation(self):
-        if self.battle is not None and self.battle.current()["screen"] == "战斗":
-            return self.observe_battle()
-        image = self.preparation_frame()
-        reader = self.protagonist_reader()
-        if reader.stage(image) is not None:
-            return self.protagonist_action(image=image)
-        if self.supply_reader().page(image):
-            return self.supply_action(image=image)
-        result = self.preparation.recognize(image)
-        if result["result"] != "success" and result["screen"] != "备战":
-            return self.investment_strategy("preparation", image=image)
-        if self.battle is not None:
-            self.battle.begin(result)
-        return {**self.save_image(image), **result}
+    def observe(self):
+        from flow.observe import observe
+
+        return observe(self)
+
 
     def investment_strategy(self, action="read", option=None, image=None):
         from screens.strategy import StrategyOperation
@@ -343,6 +361,33 @@ class Session:
         if self.protagonist is None:
             self.protagonist = Protagonist(self.preparation_reader())
         return self.protagonist
+
+    def encounter_reader(self):
+        from screens.encounter import Encounter
+
+        if self.encounter is None:
+            self.encounter = Encounter(self.preparation_reader())
+        return self.encounter
+
+    def encounter_action(self, action="read", option=None, image=None):
+        from screens.encounter import EncounterOperation
+
+        operation = EncounterOperation(self, self.encounter_reader())
+        result = operation.execute(action, option, image)
+        if action == "choose" and result["result"] == "success" and result["screen"] == "备战":
+            if self.preparation_flow is None:
+                result = self.enter_preparation(operation.image)
+            else:
+                result = self.preparation_flow.resume(operation.image)
+        else:
+            result = operation.save(result)
+        if action != "read":
+            result = {**result, "action": "encounter" if action == "choose" else "encounter-refresh"}
+            if option is not None:
+                result["option"] = option
+        if self.battle is not None and result["result"] == "success":
+            self.battle.begin(result)
+        return result
 
     def protagonist_action(self, action="read", slot=None, option=None, image=None):
         from screens.protagonist import ProtagonistOperation
@@ -410,22 +455,6 @@ class Session:
             self.watch_battle()
         return result
 
-    def observe_battle(self):
-        from screens.battle import capture
-
-        reader = self.battle_reader()
-        state = reader.current()
-        if state.get("action") == "continue-battle":
-            return state
-        image = capture(self.controller)
-        if reader.current()["screen"] == "战斗":
-            result = reader.observe(image)
-        else:
-            result = reader.recognize(image)
-            reader.begin(result)
-        if result["screen"] == "战斗":
-            self.watch_battle()
-        return {**self.save_image(image), **result}
 
     def finish_battle(self, image):
         from screens.battle import finish
@@ -468,16 +497,27 @@ def environment(session, data):
     return session.run("environment", lambda: Navigator(session).run(data["option"]))
 
 
-def strategy(action=None):
-    if action is None:
-        return lambda session, data: session.run("strategy", session.investment_strategy)
+def trail_shop(action):
+    def handle(session, data):
+        from screens.trail_shop import TrailShop
+
+        return session.run("trail-shop-" + action, lambda: TrailShop(session).run(action, **data))
+
+    return handle
+
+
+def buy_experience(session, data):
+    from screens.experience import buy
+
+    return session.run("buy-experience", lambda: buy(session, data["xp"]))
+
+
+def strategy(action):
     return lambda session, data: session.run(f"strategy-{action}",
                                             lambda: session.investment_strategy(action, data["option"]))
 
 
-def protagonist(action=None):
-    if action is None:
-        return lambda session, data: session.run("protagonist", session.protagonist_action)
+def protagonist(action):
     return lambda session, data: session.run(f"protagonist-{action}",
                                             lambda: session.protagonist_action(action, **data))
 
@@ -486,7 +526,6 @@ def protagonist(action=None):
 ROUTES = {
     "/status": lambda session, data: session.status(),
     "/rewards": lambda session, data: session.observe_rewards(),
-    "/shop": lambda session, data: session.run("shop", session.observe_shop),
     "/overlay": lambda session, data: session.run("overlay", lambda: session.set_overlay(data["enabled"])),
     "/screenshot": lambda session, data: session.run("screenshot", session.capture),
     "/resync": lambda session, data: session.run("resync", session.capture),
@@ -497,28 +536,30 @@ ROUTES = {
         data["from_x"], data["from_y"], data["to_x"], data["to_y"], data["duration"])),
     "/press": lambda session, data: session.run("press", lambda: game_input.press(
         session.controller, session.capture, data["key"])),
-    "/move": lambda session, data: session.run("move", lambda: game_input.move(
-        session.controller, session.image_size, session.capture, data["from"], data["to"])),
+    "/move": lambda session, data: session.run("move", lambda: session.move_character(data["from"], data["to"])),
+    "/buy-experience": buy_experience,
     "/sell": lambda session, data: session.run("sell", lambda: session.sell_character(data["from"])),
+    "/armament-open": lambda s, d: s.run("armament-open", lambda: s.armament_action("open", d["slot"])),
+    "/armament-choose": lambda s, d: s.run("armament-choose", lambda: s.armament_action("choose", d["option"])),
     "/shop-open": lambda session, data: session.run("shop-open", lambda: session.shop("open")),
     "/shop-close": lambda session, data: session.run("shop-close", lambda: session.shop("closed")),
+    **{f"/trail-shop-{action}": trail_shop(action) for action in ("open", "buy", "close")},
     "/refresh": lambda session, data: session.run("refresh", session.refresh_shop),
     "/navigate": navigate,
     "/environment": environment,
-    "/preparation": lambda session, data: session.run("preparation", session.observe_preparation),
-    "/strategy": strategy(),
+    "/observe": lambda session, data: session.run("observe", session.observe),
     "/strategy-refresh": strategy("refresh"),
     "/strategy-choose": strategy("choose"),
-    "/supply": lambda session, data: session.run("supply", session.supply_action),
     "/supply-refresh": lambda session, data: session.run("supply-refresh", lambda: session.supply_action("refresh")),
     "/supply-choose": lambda session, data: session.run("supply-choose",
         lambda: session.supply_action("choose", data["option"])),
-    "/protagonist": protagonist(),
+    "/encounter-refresh": lambda session, data: session.run("encounter-refresh", lambda: session.encounter_action("refresh")),
+    "/encounter-choose": lambda session, data: session.run("encounter-choose",
+        lambda: session.encounter_action("choose", data["option"])),
     **{f"/protagonist-{name}": protagonist(name)
        for name in ("open", "character", "aura", "refresh", "confirm")},
     "/collect": lambda session, data: session.run("collect", session.collect_rewards),
     "/start-battle": lambda session, data: session.run("start-battle", session.start_battle),
-    "/battle": lambda session, data: session.run("battle", session.observe_battle),
     "/prepare": lambda session, data: session.run("prepare", session.enter_preparation),
     "/continue-battle": lambda session, data: session.run("continue-battle", session.continue_battle),
 }
@@ -581,10 +622,13 @@ def request(command, info=None, data=None):
         headers={"Content-Type": "application/json"},
     )
     timeout = 60 if (
-        command in {"navigate", "preparation", "strategy", "strategy-refresh",
+        command in {"navigate", "observe", "strategy-refresh",
                     "strategy-choose", "prepare", "continue-battle"}
-        or command.startswith(("protagonist", "supply"))
+        or command.startswith(("protagonist", "supply", "encounter"))
     ) else 30
+    # 防：批量经验购买逐次等待确认，超过默认单条命令通信时限。
+    if command == "buy-experience":
+        timeout += min(5 * (data["xp"] // 4), 3600)
     try:
         with build_opener(ProxyHandler({})).open(req, timeout=timeout) as response:
             return json.load(response)

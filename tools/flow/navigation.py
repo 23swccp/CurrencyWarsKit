@@ -186,7 +186,7 @@ class Navigator:
     def opening(self):
         self.wait_text((470, 170, 240, 65), "本场对局首领")
         self.wait_text((1200, 940, 410, 90), "下一步")
-        sleep(1)  # 实机页面文字出现后，按钮尚未响应点击，额外等待一秒。
+        sleep(3)  # 实机页面文字出现后按钮尚未响应，按用户要求再多等两秒。
         self.click(*NEXT)
         self.wait_text((830, 930, 280, 80), "点击空白处继续")
         self.click(*CONTINUE)

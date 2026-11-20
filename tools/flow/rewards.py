@@ -12,7 +12,7 @@ from recognition_debug import trace
 def reward_path():
     points = [REWARD_CORNERS[0]]
     for (x0, y0), (x1, y1) in zip(REWARD_CORNERS, REWARD_CORNERS[1:]):
-        steps = ceil(hypot(x1 - x0, y1 - y0) / 50)
+        steps = ceil(hypot(x1 - x0, y1 - y0) / 25)
         points.extend((round(x0 + (x1 - x0) * step / steps), round(y0 + (y1 - y0) * step / steps))
                       for step in range(1, steps + 1))
     return tuple(points)
@@ -32,7 +32,7 @@ def sweep(controller):
         wait_input(controller.post_touch_down(*REWARD_START), "按下")
         for x, y in TRACE:
             wait_input(controller.post_touch_move(x, y), f"移动至 ({x}, {y})")
-            sleep(0.02)
+            sleep(0.04)
     finally:
         wait_input(controller.post_touch_up(), "释放")
 

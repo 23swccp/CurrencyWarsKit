@@ -256,7 +256,11 @@ class SupplyOperationTests(unittest.TestCase):
 class SupplyFlowTests(unittest.TestCase):
     def setUp(self):
         self.session = Mock()
-        self.session.protagonist_reader.return_value.stage.return_value = None
+        self.session.protagonist_reader.return_value.selection_page.return_value = False
+        self.session.encounter_reader.return_value.page.return_value = False
+        self.session.strategy_reader.return_value.page.return_value = False
+        self.session.preparation_reader.return_value.score.return_value = 0
+        self.session.preparation_reader.return_value.action_button.return_value = {"next_action": None}
         self.reader = self.session.supply_reader.return_value
         self.reader.page.return_value = True
         self.reader.read.return_value = observation(False)
@@ -269,7 +273,7 @@ class SupplyFlowTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     def test_supply_precedes_preparation_and_stops_blank_clicking(self):
-        with patch("flow.prepare.layout") as layout:
+        with patch("flow.preparation_scene.layout") as layout:
             result = PreparationFlow(self.session).enter(delay=8)
         self.assertEqual(result["screen"], "补给")
         self.assertEqual(result["result"], "success")
@@ -281,33 +285,19 @@ class SupplyFlowTests(unittest.TestCase):
     def test_supply_after_sweep_resumes_without_recollecting(self):
         self.reader.page.side_effect = [False, True, False]
         self.session.preparation_reader.return_value.observe.return_value = {"result": "success", "slots": {}}
-        with patch("flow.prepare.layout", return_value={"result": "success", "screen": "备战", "shop": "closed"}):
+        with patch("flow.preparation_scene.layout", return_value={"result": "success", "screen": "备战", "shop": "closed"}):
             flow = PreparationFlow(self.session)
             self.assertEqual(flow.enter("before")["screen"], "补给")
             self.assertEqual(flow.resume("after")["screen"], "备战")
         self.sweep.assert_called_once()
         self.session.preparation_reader.return_value.observe.assert_called_once_with("after")
 
-    def test_read_only_preparation_and_collection_scene_dispatch_supply(self):
-        session = Session(1, "framepool")
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = None
-        session.strategy = Mock()
-        session.strategy.page.return_value = False
-        session.supply = Mock()
-        session.supply.page.return_value = True
-        session.preparation = Mock()
-        session.preparation.score.return_value = 0
-        session.preparation_frame = Mock(return_value="supply")
-        session.supply_action = Mock(return_value=observation())
-        self.assertEqual(session.observe_preparation()["screen"], "补给")
-        session.supply_action.assert_called_once_with(image="supply")
-        self.assertEqual(session.preparation_scene("supply")["screen"], "补给")
-        session.preparation.recognize.assert_not_called()
 
     def test_confirmed_choice_resumes_existing_progress_with_same_frame(self):
         session = Session(1, "framepool")
         session.supply = Mock()
+        session.encounter = Mock()
+        session.encounter.page.return_value = False
         session.preparation_flow = Mock()
         session.preparation_flow.resume.return_value = {"result": "success", "screen": "备战", "slots": {}}
         with patch("screens.supply.SupplyOperation") as operation:

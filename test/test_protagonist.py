@@ -280,16 +280,6 @@ class ProtagonistSessionTests(unittest.TestCase):
         self.assertEqual(result["action"], "protagonist-confirm")
         operation.return_value.save.assert_not_called()
 
-    def test_readonly_preparation_dispatches_before_slot_reading(self):
-        session = Session(1, "framepool")
-        session.preparation = Mock()
-        session.preparation_frame = Mock(return_value="main-entry")
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = "entry"
-        session.protagonist_action = Mock(return_value={"screen": "选择主角"})
-        self.assertEqual(session.observe_preparation()["screen"], "选择主角")
-        session.protagonist_action.assert_called_once_with(image="main-entry")
-        session.preparation.recognize.assert_not_called()
 
 
 if __name__ == "__main__":

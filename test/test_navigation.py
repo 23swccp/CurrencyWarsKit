@@ -113,7 +113,7 @@ class NavigationTests(unittest.TestCase):
         nav.session.save_image.return_value = {"screenshot": "same-frame.png"}
         with patch("flow.navigation.sleep") as sleep, patch("screens.environment.recognize", return_value={"options": [{}, {}, {}], "needs_ai": True}) as recognize:
             result = Navigator.opening(nav)
-        sleep.assert_called_once_with(1)
+        sleep.assert_called_once_with(3)
         self.assertTrue(result["needs_ai"])
         self.assertEqual(nav.click.call_args_list, [call(1400, 984), call(960, 965)])
         recognize.assert_called_once_with("image", nav.read, nav.equipment)

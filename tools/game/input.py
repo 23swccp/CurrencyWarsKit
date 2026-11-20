@@ -53,15 +53,11 @@ def drag(controller, image_size, capture, x1, y1, x2, y2, duration):
     return execute("拖动", lambda: controller.post_swipe(x1, y1, x2, y2, duration), capture)
 
 
-def move(controller, image_size, capture, source, target):
-    from game.slots import SLOTS
-
+def move(controller, image_size, capture, source, target, positions):
     # 防：槽位坐标只按 1920×1080 截图确定。
     if image_size != (1920, 1080):
         raise ValueError("槽位拖动仅支持 1920×1080 截图")
-    x1, y1 = SLOTS[source]
-    x2, y2 = SLOTS[target]
-    result = drag(controller, image_size, capture, x1, y1, x2, y2, 700)
+    result = drag(controller, image_size, capture, *positions[source], *positions[target], 700)
     return {**result, "result": "uncertain", "action": "move", "from": source, "to": target,
             "message": "已发送槽位拖动；请检查后续画面确认移动或交换结果"}
 

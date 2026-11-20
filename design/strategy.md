@@ -5,23 +5,39 @@
 ## 命令
 
 ```powershell
-.\.venv\Scripts\python.exe tools/cw.py strategy
+.\.venv\Scripts\python.exe tools/cw.py observe
 .\.venv\Scripts\python.exe tools/cw.py act strategy-refresh --option 1
 .\.venv\Scripts\python.exe tools/cw.py act strategy --option 3
 ```
 
-编号从左到右为 1～3。`preparation` 备战确认未通过时用同帧识别本页，命中后返回选项；之后同时识别备战与本页，最多 8 秒。
+编号从左到右为 1～3。`observe` 在当前帧识别本页，命中后返回选项；识别不全时返回待确认。
 
 ## 读取
 
 先匹配「请选择投资策略」标题，再读三项名称、描述、各自剩余刷新次数和当前选中项，附同帧截图与 `needs_ai: true`。标题、选中边框、商店展开的两处标志都用 0.9 阈值。名称、描述或次数未读全时继续观察，间隔 0.3 秒，最多 8 秒，超时返回最后一帧的识别内容与 `uncertain`。
 
-## 刷新
+## 刷新与选择
 
-读取完整选项后，指定项剩余次数大于零时点击该项刷新一次，等待次数减少且三项文字读全，返回新选项。各项次数独立保留，刷新后的名称可以与之前相同；次数为零返回 `failed`，点击后结果待核对返回 `uncertain`。每条命令最多点击一次刷新。
+```mermaid
+flowchart TD
+    Start["AI 指定三项之一"] --> Read{"三项文字和次数已读全？"}
+    Read -->|否| Pending["返回 uncertain 和最近截图"]
+    Read -->|是| Action{"指令"}
+    Action -->|单项刷新| Count{"指定项还有刷新次数？"}
+    Count -->|否| Reject["返回 failed"]
+    Count -->|是| Refresh["点击指定项的刷新一次"]
+    Refresh --> Changed{"次数减少，三项文字已读全？"}
+    Changed -->|是| Return["返回新选项，名称允许相同"]
+    Changed -->|到期仍待确认| Pending
+    Action -->|选择| Pick["点击指定卡一次，匹配选中边框"]
+    Pick -->|已选中| Confirm["点击确认一次"]
+    Pick -->|结果待核对| Pending
+    Confirm --> Next{"确认后的界面"}
+    Next -->|备战| Resume["返回 success，用同帧衔接本轮备战"]
+    Next -->|新的投资策略| ReturnNew["读新选项，返回 uncertain 交 AI 核对"]
+    Next -->|其他页面或到期| Pending
+```
 
-## 选择
+刷新次数按项独立记录。输入、截图或识别任务出错时返回异常类型、步骤和最近截图。
 
-读取完整选项后点击指定卡片一次，匹配该卡片的选中边框后点击确认一次，再等待离开本页并识别备战或新的投资策略。离开本页后再次出现投资策略时，读取新选项交给 AI，返回 `uncertain` 由 AI 核对选择结果。确认后识别到备战才报告 `success`，其他页面或等待到期返回 `uncertain` 与现场。输入或后续截图、识别出错时保留异常类型、步骤信息与最近观察截图。
-
-确认返回备战后衔接[统一备战入口](prepare.md)，用确认后的同帧处理布局：商店展开时收起并确认，再按本轮进度收集、读取新画面；已完成收集时保留进度。最终返回带 `action: "strategy"` 与指定的 `option`。
+返回备战后经[统一备战入口](prepare.md)确认商店收起，保留本轮已有收集进度，以新帧返回观察及 `action: "strategy"`、`option`。

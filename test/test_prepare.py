@@ -29,11 +29,15 @@ class PreparationFlowTests(unittest.TestCase):
         self.job.succeeded = True
         self.job.get.side_effect = [f"frame-{i}" for i in range(1, 20)]
         self.flow = PreparationFlow(self.session)
-        self.flow.supply.page.return_value = False
-        self.flow.protagonist.stage.return_value = None
+        self.flow.reader.score.return_value = 0
+        self.flow.reader.action_button.return_value = {"next_action": None}
+        self.session.supply_reader.return_value.page.return_value = False
+        self.session.encounter_reader.return_value.page.return_value = False
+        self.session.protagonist_reader.return_value.selection_page.return_value = False
         self.flow.reader.observe.return_value = {"result": "success", "slots": {"front_1": None}, "gold": 31}
-        self.flow.strategy.page.return_value = False
-        self.layout = patch("flow.prepare.layout", return_value=preparation()).start()
+        self.strategy = self.session.strategy_reader.return_value
+        self.strategy.page.return_value = False
+        self.layout = patch("flow.preparation_scene.layout", return_value=preparation()).start()
         self.sleep = patch("flow.prepare.sleep").start()
         self.sweep = patch("flow.prepare.sweep").start()
         self.addCleanup(patch.stopall)
@@ -80,25 +84,25 @@ class PreparationFlowTests(unittest.TestCase):
         self.flow.reader.observe.assert_not_called()
 
     def test_choice_before_collecting_returns_options_to_ai(self):
-        self.layout.return_value = None
-        self.flow.strategy.page.return_value = True
-        self.flow.strategy.read.return_value = strategy()
+        self.strategy.page.return_value = True
+        self.strategy.read.return_value = strategy()
         result = self.flow.enter()
         self.assertEqual(result["screen"], "投资策略")
         self.assertTrue(result["needs_ai"])
         self.assertEqual(len(result["options"]), 3)
+        self.layout.assert_not_called()
         self.sweep.assert_not_called()
         self.session.controller.post_click.assert_not_called()
 
     def test_incomplete_choice_retries_and_keeps_last_options(self):
         self.layout.return_value = None
-        self.flow.strategy.page.return_value = True
-        self.flow.strategy.read.return_value = strategy(unknown=True)
+        self.strategy.page.return_value = True
+        self.strategy.read.return_value = strategy(unknown=True)
         result = self.flow.enter()
         self.assertEqual(result["result"], "uncertain")
         self.assertEqual(result["screen"], "投资策略")
         self.assertTrue(result["options"][0]["unknown"])
-        self.assertEqual(self.flow.strategy.read.call_count, 3)
+        self.assertEqual(self.strategy.read.call_count, 3)
         self.assertEqual(result["screenshot"], "frame-3.png")
         self.sweep.assert_not_called()
         self.session.controller.post_click.assert_not_called()
@@ -130,16 +134,16 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(self.sleep.call_args_list, [call(2), call(2), call(4)])
         self.session.controller.post_click.assert_called_once_with(*BLANK)
         self.flow.reader.observe.assert_called_once_with("frame-4")
-        self.flow.strategy.read.assert_not_called()
+        self.strategy.read.assert_not_called()
 
     def test_strategy_title_stops_wait_clicks_before_reading_text(self):
-        self.layout.return_value = None
-        self.flow.strategy.page.return_value = True
-        self.flow.strategy.read.return_value = strategy()
+        self.strategy.page.return_value = True
+        self.strategy.read.return_value = strategy()
         result = self.flow.enter(delay=8)
         self.assertEqual(result["screen"], "投资策略")
         self.assertEqual(self.sleep.call_args_list, [call(2), call(6)])
-        self.flow.strategy.read.assert_called_once_with("frame-2")
+        self.strategy.read.assert_called_once_with("frame-2")
+        self.layout.assert_not_called()
         self.session.controller.post_click.assert_not_called()
         self.sweep.assert_not_called()
 
@@ -155,11 +159,9 @@ class PreparationFlowTests(unittest.TestCase):
         self.sweep.assert_not_called()
 
     def test_choice_after_collecting_resumes_without_another_sweep(self):
-        self.layout.side_effect = [preparation(), None]
-        self.flow.strategy.page.return_value = True
-        self.flow.strategy.read.return_value = strategy()
+        self.strategy.page.side_effect = [False, True, False]
+        self.strategy.read.return_value = strategy()
         self.assertEqual(self.flow.enter()["screen"], "投资策略")
-        self.layout.side_effect = None
         result = self.flow.resume("chosen")
         self.assertEqual(result["screen"], "备战")
         self.sweep.assert_called_once()
@@ -167,11 +169,9 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertEqual(result["screenshot"], "chosen.png")
 
     def test_choice_before_collecting_resumes_with_one_sweep(self):
-        self.layout.return_value = None
-        self.flow.strategy.page.return_value = True
-        self.flow.strategy.read.return_value = strategy()
+        self.strategy.page.side_effect = [True, False, False]
+        self.strategy.read.return_value = strategy()
         self.flow.enter()
-        self.layout.return_value = preparation()
         result = self.flow.resume("chosen")
         self.assertEqual(result["screen"], "备战")
         self.sweep.assert_called_once()
@@ -233,13 +233,17 @@ class PreparationSessionTests(unittest.TestCase):
     def test_main_character_entry_opens_before_collecting(self):
         session = Mock()
         flow = PreparationFlow(session)
-        flow.protagonist.stage.return_value = "entry"
+        flow.reader.score.return_value = 0
+        session.protagonist_reader.return_value.selection_page.return_value = False
+        session.supply_reader.return_value.page.return_value = False
+        session.encounter_reader.return_value.page.return_value = False
+        session.strategy_reader.return_value.page.return_value = False
         entry = {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True,
                  "button_text": "选择主角", "next_action": "protagonist-open", "node": "1-9"}
-        flow.reader.header.return_value = {"node": "1-9"}
         flow.reader.action_button.return_value = {"button_text": "选择主角", "next_action": "protagonist-open"}
         session.save_image.side_effect = lambda image: {"screenshot": f"{image}.png"}
-        with patch("flow.prepare.ProtagonistOperation") as operation, patch("flow.prepare.sweep") as sweep:
+        with patch("flow.preparation_scene.layout", return_value={**preparation(), "node": "1-9"}), \
+                patch("flow.prepare.ProtagonistOperation") as operation, patch("flow.prepare.sweep") as sweep:
             operation.return_value.execute.return_value = {"result": "success", "screen": "选择主角", "stage": "selection"}
             operation.return_value.image = "options"
             operation.return_value.clicked = True
@@ -252,10 +256,12 @@ class PreparationSessionTests(unittest.TestCase):
     def test_main_character_title_stops_blank_clicking_during_wait(self):
         session = Mock()
         flow = PreparationFlow(session)
-        flow.protagonist.stage.return_value = "selection"
+        flow.reader.score.return_value = 0
+        protagonist = session.protagonist_reader.return_value
+        protagonist.selection_page.return_value = True
         choice = {"screen": "选择主角", "stage": "selection", "needs_ai": True,
                   "gold": 46, "refreshes_left": 6, "options": [{"name": "光环", "text": "效果"}]}
-        flow.protagonist.read.return_value = choice
+        protagonist.read.return_value = choice
         session.controller.post_screencap.return_value.wait.return_value.get.return_value = "options"
         session.save_image.return_value = {"screenshot": "options.png"}
         with patch("flow.prepare.sleep") as sleep, patch("flow.prepare.sweep") as sweep:

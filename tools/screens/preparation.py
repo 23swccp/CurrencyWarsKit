@@ -14,12 +14,15 @@ from maa.tasker import Tasker
 
 from ocr import ImageController, MODEL
 from recognition_debug import focus
+from screens import armament, card_stars
+from screens.emblems import Emblems
 from screens.inventory import Inventory
 from game.actions import BUTTON_ACTIONS
 from game.slots import (
-    ACTION_BUTTON, BENCH_WARNING, CARDS, CARD_SIZE, EMPTY, HEADER, ICONS,
-    NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN,
+    ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, CARDS_BY_BACKSTAGE, CARD_SIZE, FRONT,
+    HEADER, ICONS, NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN, SLOTS_BY_BACKSTAGE,
 )
+from game.traits import catalog, projection
 
 
 ASSETS = Path(__file__).resolve().parents[2] / "asset"
@@ -28,6 +31,7 @@ ASPECTS = (0.9, 1.0)
 WORKERS = 16
 MIN_SCORE = 0.8
 MIN_MARGIN = 0.1
+SEVEN_EMPTY_TEMPLATES = {f"back_{index}": f"back_seven_{index}" for index in range(4, 8)}
 
 
 def parse_numbers(texts):
@@ -99,6 +103,21 @@ def layout(image, reader):
     return None
 
 
+def backstage_size(image):
+    # 两套布局相差半格，一套卡槽顶部的中心落在另一套的槽间空隙。
+    band = image[593:602].astype(np.int16)
+    edges = np.abs(np.diff(band, axis=0))
+    scores = {}
+    for count, cards in CARDS_BY_BACKSTAGE.items():
+        centers = [(quad[0] + quad[6]) // 2 for slot, quad in cards.items() if slot.startswith("back_")]
+        scores[count] = np.median([edges[:, x-4:x+5].mean(axis=(1, 2)).max() for x in centers])
+    count = max(scores, key=scores.get)
+    # 防：边框没有足够对比度，或两套坐标同时出现近似强度的边缘。
+    if scores[count] >= 14 and abs(scores[6] - scores[7]) >= 10:
+        return count
+    return None
+
+
 class Recognition:
     def __init__(self, controller):
         self.resource = Resource()
@@ -136,9 +155,14 @@ class Preparation(Recognition):
         self.header_image = None
         self.header_result = None
         self.inventory = Inventory()
-        for name in ("shop", "icons", "shop_open", "sell", "armament", "bench_warning", *EMPTY):
+        self.emblems = Emblems(self.resource, self.tasker, catalog()["emblems"])
+        for name in ("shop", "icons", "shop_open", "sell", "armament", "armament_advanced", "armament_open",
+                     "bench_warning", *CARDS, *SEVEN_EMPTY_TEMPLATES.values()):
             with Image.open(ASSETS / "preparation" / f"{name}.png") as image:
                 self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
+        for name in ("title", "entry", "details"):
+            with Image.open(ASSETS / "trail_shop" / f"{name}.png") as image:
+                self.resource.override_image(f"trail_{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
         index = json.loads((ASSETS / "character" / "index.json").read_text(encoding="utf-8"))
         self.portraits = []
         for character in index["characters"]:
@@ -178,12 +202,14 @@ class Preparation(Recognition):
 
     def observe(self, image):
         started = perf_counter()
-        numbers = self.numbers(image)
-        cards = self.slots(image)
+        result = {**self.numbers(image), **self.slots(image)}
+        slots = result["slots"]
         capacity = self.capacity_warning(image)
-        if not capacity and all(cards["slots"][f"bench_{i}"] is not None for i in range(1, 10)):
+        if not capacity and all(slots[slot] is not None for slot in BENCH):
             capacity = {"reason": "bench_full", "needs_ai": True}
-        return {**cards, **numbers, **capacity, "inventory": self.inventory.read(image),
+        return {**result, **capacity, "inventory": self.inventory.read(image),
+                "trait_projection": projection(slots, self.emblems.read(image, slots),
+                                               partial=result["backstage_count"] is None),
                 **self.action_button(image), "node": self.header(image)["node"],
                 "recognition_ms": round((perf_counter() - started) * 1000, 1)}
 
@@ -194,14 +220,24 @@ class Preparation(Recognition):
                     "message": "角色卡溢出，请 AI 选择并售卖角色"}
         return {}
 
-    def text_boxes(self, image, name, roi):
-        focus(image, roi, name, "ocr")
+    def _ocr_lines(self, image, name, roi):
         detail = self.tasker.post_recognition(JRecognitionType.OCR, JOCR(roi=roi), image).wait().get()
         # 防：OCR 任务详情缺失。
         if detail is None or not detail.nodes or detail.nodes[0].recognition is None:
             raise RuntimeError(f"备战 OCR 详情缺失：{name} {roi}")
-        lines = sorted(detail.nodes[0].recognition.filtered_results, key=lambda item: (item.box[1], item.box[0]))
-        return [{"text": item.text, "box": list(item.box)} for item in lines]
+        return sorted(detail.nodes[0].recognition.filtered_results, key=lambda item: (item.box[1], item.box[0]))
+
+    def text_boxes(self, image, name, roi):
+        focus(image, roi, name, "ocr")
+        return [{"text": item.text, "box": list(item.box)} for item in self._ocr_lines(image, name, roi)]
+
+    def enlarged_text(self, image, name, roi):
+        focus(image, roi, name, "ocr")
+        x, y, w, h = roi
+        patch = Image.fromarray(image[y:y+h, x:x+w]).resize((w*2, h*2), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (w*2 + 24, h*2 + 20), (20, 20, 20))
+        canvas.paste(patch, (12, 10))
+        return "".join(item.text for item in self._ocr_lines(np.asarray(canvas), f"{name} {roi}", (0, 0, 0, 0)))
 
     def text(self, image, name, roi):
         return "".join(item["text"] for item in self.text_boxes(image, name, roi))
@@ -239,19 +275,38 @@ class Preparation(Recognition):
             self.button_image, self.button_result = image, result
         return self.button_result
 
-    def empty(self, image, slot):
-        x, y, width, height = EMPTY[slot]
-        return self.score(image, f"{slot}.png", (x-4, y-4, width+8, height+8)) >= 0.9
+    def empty(self, image, slot, backstage=6) -> bool | None:
+        name = slot
+        threshold = 0.7
+        if slot.startswith("back_"):
+            threshold = 0.9
+            if backstage == 7:
+                name = SEVEN_EMPTY_TEMPLATES.get(slot)
+                # 防：七格左三格还没有空槽样本，邻格模板不能确认空位。
+                if name is None:
+                    return None
+        x, y = SLOTS_BY_BACKSTAGE[backstage][slot]
+        return self.score(image, f"{name}.png", (x-21, y-29, 42, 58)) >= threshold
 
-    def card(self, image, slot):
-        if self.empty(image, slot):
+    def card(self, image, slot, backstage=6):
+        if self.empty(image, slot, backstage):
             return None
-        quad = CARDS[slot]
+        if slot.startswith("bench_") and armament.is_box(self, image, slot):
+            return {"kind": "armament", "action": "armament-open"}
+        quad = CARDS_BY_BACKSTAGE[backstage][slot]
         xs, ys = quad[::2], quad[1::2]
         focus(image, (min(xs), min(ys), max(xs)-min(xs), max(ys)-min(ys)), f"{slot} 卡片裁剪", "crop")
         card = Image.fromarray(image).transform(CARD_SIZE, Image.Transform.QUAD, quad, Image.Resampling.BICUBIC)
-        return self.match(np.asarray(card.crop(PORTRAIT)).copy())
+        identity = self.match(np.asarray(card.crop(PORTRAIT)).copy())
+        return {**identity, "stars": card_stars.read(image, card, quad, slot)}
 
     def slots(self, image):
-        slots = {slot: self.card(image, slot) for slot in CARDS}
-        return {"slots": slots, "candidate_count": len(self.portraits)}
+        backstage = backstage_size(image)
+        result = {"backstage_count": backstage, "candidate_count": len(self.portraits)}
+        # 防：后台边框模糊时只读六格和七格共用坐标的前台及备战席。
+        if backstage is None:
+            slots = {slot: self.card(image, slot) for slot in (*FRONT, *BENCH)}
+            return {**result, "slots": slots, "result": "uncertain", "needs_ai": True,
+                    "message": "后台槽位布局待确认"}
+        return {**result, "slots": {slot: self.card(image, slot, backstage)
+                                    for slot in CARDS_BY_BACKSTAGE[backstage]}}

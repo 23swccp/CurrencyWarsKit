@@ -17,7 +17,7 @@ class Equipment:
         vectors -= vectors.mean(axis=1, keepdims=True)
         self.vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
-    def match(self, image):
+    def match(self, image, *, min_score=0.8, margin=0.1):
         vector = np.asarray(Image.fromarray(image[:, :, ::-1]).resize((60, 60)), dtype=np.float32).ravel()
         vector -= vector.mean()
         norm = np.linalg.norm(vector)
@@ -28,7 +28,7 @@ class Equipment:
         best = np.argsort(scores)[-2:][::-1]
         candidates = [{"id": self.paths[index].stem, "score": round(float(scores[index]), 3)} for index in best]
         # 防：库外图标或相似候选分数接近。
-        if scores[best[0]] < 0.8 or scores[best[0]] - scores[best[1]] < 0.1:
+        if scores[best[0]] < min_score or scores[best[0]] - scores[best[1]] < margin:
             return {"unknown": True, "candidates": candidates}
         path = self.paths[best[0]]
         return {"id": path.stem, "asset": str(path), "score": candidates[0]["score"]}

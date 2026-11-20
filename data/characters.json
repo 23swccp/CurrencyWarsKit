@@ -2,100 +2,179 @@
   "阿格莱雅": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "奇兽花园",
+      "连击"
     ]
   },
   "寒鸦": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "连击"
     ]
   },
   "缇宝": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "小小巨人",
+      "追击"
     ]
   },
   "风堇": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "奇兽花园",
+      "召唤",
+      "治疗"
     ]
   },
   "昔涟": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "黄金大饭店",
+      "召唤"
     ]
   },
   "镜流": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "云上五骁",
+      "连击"
     ]
   },
   "赛飞儿": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "奇兽花园",
+      "群攻"
     ]
   },
   "遐蝶": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "黄金大饭店",
+      "召唤"
     ]
   },
   "白露": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "云上五骁",
+      "连击",
+      "治疗"
     ]
   },
   "花火": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "梦境交织",
+      "小小巨人",
+      "欢愉"
     ]
   },
   "知更鸟": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "少女乐队",
+      "追击"
     ]
   },
   "星期日": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "开拓银轨",
+      "连击"
     ]
   },
   "万敌": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "奇兽花园",
+      "黄金大饭店",
+      "反击"
     ]
   },
   "海瑟音": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "奇兽花园",
+      "持续伤害"
     ]
   },
   "那刻夏": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "奇兽花园",
+      "连击"
     ]
   },
   "刻律德菈": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "小小巨人",
+      "连击"
     ]
   },
   "长夜月": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "奇兽花园",
+      "梦境交织",
+      "召唤"
     ]
   },
   "火花": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "少女乐队",
+      "欢愉"
     ]
   },
   "星神★阿哈": {
@@ -106,223 +185,400 @@
   "卡芙卡": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "星核猎手",
+      "持续伤害"
     ]
   },
   "克拉拉": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "星间旅人",
+      "反击",
+      "机心巧匠"
     ]
   },
   "丹恒•饮月": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "开拓银轨",
+      "云上五骁",
+      "双龙吟"
     ]
   },
   "雪衣": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "击破"
     ]
   },
   "翡翠": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "千星商会",
+      "群攻",
+      "黑市主理人"
     ]
   },
   "白厄": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "黄金大饭店",
+      "盗火行者"
     ]
   },
   "不死途": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "追击",
+      "巡海游侠"
     ]
   },
   "帕姆王": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "开拓银轨"
     ]
   },
   "希露瓦": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "少女乐队",
+      "持续伤害"
     ]
   },
   "刃": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "云上五骁",
+      "反击"
     ]
   },
   "藿藿": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "小小巨人",
+      "能量",
+      "治疗"
     ]
   },
   "砂金": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "星间旅人",
+      "追击",
+      "守护"
     ]
   },
   "黄泉": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "梦境交织",
+      "群攻"
     ]
   },
   "千冶•刃": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "星核猎手",
+      "群攻"
     ]
   },
   "姬子•启行": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "开拓银轨",
+      "能量"
     ]
   },
   "砂金•戏浪": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "千星商会",
+      "欢愉"
     ]
   },
   "罗刹": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "星间旅人",
+      "治疗"
     ]
   },
   "符玄": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "小小巨人",
+      "反击",
+      "守护"
     ]
   },
   "椒丘": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "持续伤害"
     ]
   },
   "飞霄": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "追击"
     ]
   },
   "乱破": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "少女乐队",
+      "击破"
     ]
   },
   "大丽花": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "梦境交织",
+      "击破"
     ]
   },
   "交光": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "千星商会",
+      "欢愉"
     ]
   },
   "银狼LV.999": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "幻月游戏",
+      "星核猎手",
+      "欢愉"
     ]
   },
   "开拓者": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "开拓银轨",
+      "星核猎手",
+      "能量"
     ]
   },
   "娜塔莎": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "星间旅人",
+      "持续伤害",
+      "治疗"
     ]
   },
   "云璃": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "反击"
     ]
   },
   "流萤": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "星核猎手",
+      "击破"
     ]
   },
   "大黑塔": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "星间旅人",
+      "群攻"
     ]
   },
   "绯英": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "能量"
     ]
   },
   "知更鸟•晴歌": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "千星商会",
+      "召唤",
+      "能量"
     ]
   },
   "瓦尔特": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "开拓银轨",
+      "群攻"
     ]
   },
   "托帕&账账": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "千星商会",
+      "追击"
     ]
   },
   "景元": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "云上五骁",
+      "召唤"
     ]
   },
   "桂乃芬": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "持续伤害"
     ]
   },
   "灵砂": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "仙舟舰队",
+      "群攻",
+      "治疗"
     ]
   },
   "三月七": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "开拓银轨",
+      "追击"
     ]
   },
   "忘归人": {
     "positions": [
       "front",
       "back"
+    ],
+    "traits": [
+      "星间旅人",
+      "击破"
     ]
   },
   "黑天鹅": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "梦境交织",
+      "持续伤害"
     ]
   },
   "波提欧": {
     "positions": [
       "front"
+    ],
+    "traits": [
+      "星间旅人",
+      "击破"
     ]
   },
   "真珠": {
     "positions": [
       "back"
+    ],
+    "traits": [
+      "幻月游戏",
+      "千星商会",
+      "守护"
     ]
   }
 }

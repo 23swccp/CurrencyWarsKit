@@ -440,14 +440,6 @@ class MonitorTests(unittest.TestCase):
 
 
 class BattleSessionTests(unittest.TestCase):
-    def test_completed_handoff_returns_saved_result_without_new_input(self):
-        session = Session(1, "framepool")
-        session.battle = Mock()
-        result = {"result": "success", "screen": "备战", "action": "continue-battle", "screenshot": "prepared.png"}
-        session.battle.current.return_value = result
-        with patch("screens.battle.capture") as capture:
-            self.assertEqual(session.observe_battle(), result)
-        capture.assert_not_called()
 
     def test_idle_service_can_report_battle_stage(self):
         session = Session(1, "framepool")
@@ -473,14 +465,6 @@ class BattleSessionTests(unittest.TestCase):
             session.start_battle()
         monitor.assert_not_called()
 
-    def test_preparation_during_known_battle_returns_battle_observation(self):
-        session = Session(1, "framepool")
-        session.battle = Mock()
-        session.battle.current.return_value = {"screen": "战斗"}
-        session.observe_battle = Mock(return_value={"screen": "战斗"})
-        session.preparation_frame = Mock()
-        self.assertEqual(session.observe_preparation()["screen"], "战斗")
-        session.preparation_frame.assert_not_called()
 
     def test_stop_signals_monitor(self):
         session = Session(1, "framepool")
@@ -488,21 +472,6 @@ class BattleSessionTests(unittest.TestCase):
         session.stop()
         session.battle_monitor.stop.assert_called_once_with()
 
-    def test_preparation_after_settlement_updates_recorded_stage(self):
-        session = Session(1, "framepool")
-        session.supply = Mock()
-        session.supply.page.return_value = False
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = None
-        session.battle = Mock()
-        session.battle.current.return_value = {"screen": "本场结算"}
-        session.preparation = Mock()
-        observation = {"result": "success", "screen": "备战", "slots": {}}
-        session.preparation.recognize.return_value = observation
-        session.preparation_frame = Mock(return_value="frame")
-        session.save_image = Mock(return_value={"screenshot": "frame.png"})
-        self.assertEqual(session.observe_preparation()["screen"], "备战")
-        session.battle.begin.assert_called_once_with(observation)
 
     def test_wrong_observation_command_keeps_battle_stage(self):
         session = Session(1, "framepool")
@@ -515,29 +484,7 @@ class BattleSessionTests(unittest.TestCase):
             session.investment_strategy()
         session.battle.begin.assert_not_called()
 
-    def test_battle_observation_preserves_hidden_flag_state(self):
-        session = Session(1, "framepool")
-        session.battle = Mock()
-        session.battle.current.return_value = {"screen": "战斗"}
-        observation = {"result": "success", "screen": "战斗", "anchors": {"flag": 0.2}}
-        session.battle.observe.return_value = observation
-        session.save_image = Mock(return_value={"screenshot": "animation.png"})
-        with patch("screens.battle.capture", return_value="animation"), patch("screens.battle.Monitor"):
-            self.assertEqual(session.observe_battle()["screen"], "战斗")
-        session.battle.observe.assert_called_once_with("animation")
-        session.battle.recognize.assert_not_called()
 
-    def test_battle_observation_can_take_over_existing_battle(self):
-        session = Session(1, "framepool")
-        session.battle = Mock()
-        session.battle.current.return_value = {"screen": "未知"}
-        observation = {"result": "success", "screen": "战斗"}
-        session.battle.recognize.return_value = observation
-        session.save_image = Mock(return_value={"screenshot": "frame.png"})
-        with patch("screens.battle.capture", return_value="frame"), patch("screens.battle.Monitor") as monitor:
-            self.assertEqual(session.observe_battle()["screen"], "战斗")
-        session.battle.begin.assert_called_once_with(observation)
-        monitor.assert_called_once_with(session, session.battle)
 
 
 if __name__ == "__main__":

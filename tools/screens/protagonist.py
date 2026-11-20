@@ -39,6 +39,16 @@ def complete(result):
             and all("unknown" not in option for option in result["options"]))
 
 
+def observation(reader, image, stage):
+    if stage == "selection":
+        result = reader.read(image)
+        return {**result, "result": "success" if complete(result) else "uncertain"}
+    if stage == "entry":
+        return {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True,
+                **reader.preparation.action_button(image), "node": reader.preparation.header(image)["node"]}
+    return {"result": "uncertain", "screen": "未知", "needs_ai": True}
+
+
 class Protagonist(Recognition):
     def __init__(self, preparation):
         self.preparation = preparation
@@ -60,10 +70,13 @@ class Protagonist(Recognition):
         best = detail.nodes[0].recognition.best_result
         return best if best is not None and best.score >= 0.9 else None
 
-    def stage(self, image):
+    def selection_page(self, image):
         if image.shape[:2] != (1080, 1920):
             raise ValueError("主角识别要求 1920×1080 截图")
-        if self.find(image, "title", TITLE) is not None:
+        return self.find(image, "title", TITLE) is not None
+
+    def stage(self, image):
+        if self.selection_page(image):
             return "selection"
         if (preparation_page(image, self.preparation)["result"] == "success"
                 and self.preparation.action_button(image)["next_action"] == "protagonist-open"):
@@ -169,14 +182,7 @@ class ProtagonistOperation:
         self.input(self.session.controller.post_touch_move(*BLANK), "移开鼠标")
 
     def observe(self, image):
-        stage = self.reader.stage(image)
-        if stage == "selection":
-            result = self.reader.read(image)
-            return {**result, "result": "success" if complete(result) else "uncertain"}
-        if stage == "entry":
-            return {"result": "success", "screen": "选择主角", "stage": "entry", "needs_ai": True,
-                    **self.reader.preparation.action_button(image), "node": self.reader.preparation.header(image)["node"]}
-        return {"result": "uncertain", "screen": "未知", "needs_ai": True}
+        return observation(self.reader, image, self.reader.stage(image))
 
     def wait(self, check, message):
         for _ in range(ATTEMPTS):

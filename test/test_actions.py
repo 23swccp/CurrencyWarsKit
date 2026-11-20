@@ -78,7 +78,9 @@ class ActionDispatchTests(unittest.TestCase):
     def setUp(self):
         self.image = np.zeros((1080, 1920, 3), dtype="uint8")
         self.preparation = Preparation.__new__(Preparation)
-        self.preparation.header = Mock(return_value={"node": "1-9"})
+        self.preparation.score = Mock(side_effect=lambda image, name, roi: float(name == "shop.png"))
+        self.preparation.header = Mock(return_value={"layout": "closed", "node": "1-9",
+                                                     "phase_box": [430, 33, 80, 24]})
         self.preparation.button_image = None
         self.preparation.button_result = None
         self.preparation.load_ocr = Mock()
@@ -94,6 +96,8 @@ class ActionDispatchTests(unittest.TestCase):
         self.session.preparation = self.preparation
         self.session.protagonist = self.protagonist
         self.session.supply = Mock()
+        self.session.encounter = Mock()
+        self.session.encounter.page.return_value = False
         self.session.supply.page.return_value = False
         self.session.strategy = Mock()
         self.session.strategy.page.return_value = False
@@ -101,31 +105,8 @@ class ActionDispatchTests(unittest.TestCase):
         self.session.save_image = Mock(return_value={"screenshot": "frame.png"})
         self.session.controller = Mock()
         self.session.controller.post_click.return_value.wait.return_value.succeeded = True
-        self.page = patch("screens.protagonist.preparation_page",
-                          return_value={"result": "success", "screen": "备战"}).start()
-        self.addCleanup(patch.stopall)
 
-    def test_readonly_normal_or_unknown_label_returns_next_step_without_input(self):
-        for text, expected in (("出战", "start-battle"), ("新buff", None)):
-            image = self.image.copy()
-            self.session.preparation_frame.return_value = image
-            self.preparation.text.return_value = text
-            self.preparation.text.reset_mock()
-            result = self.session.run("preparation", self.session.observe_preparation)
-            self.assertEqual(result["screen"], "备战")
-            self.assertEqual(result["button_text"], text)
-            self.assertEqual(result["next_action"], expected)
-            self.preparation.text.assert_called_once_with(image, "右侧行动按钮", ACTION_BUTTON)
-        self.session.controller.post_click.assert_not_called()
 
-    def test_readonly_known_entry_reports_it_with_a_single_ocr(self):
-        self.preparation.text.return_value = "选择主角"
-        result = self.session.run("preparation", self.session.observe_preparation)
-        self.assertEqual(result["stage"], "entry")
-        self.assertEqual(result["next_action"], "protagonist-open")
-        self.preparation.text.assert_called_once()
-        self.preparation.observe.assert_not_called()
-        self.session.controller.post_click.assert_not_called()
 
     def test_prepare_opens_known_entry_once_without_rechecking_that_frame(self):
         self.preparation.text.return_value = "选择主角"

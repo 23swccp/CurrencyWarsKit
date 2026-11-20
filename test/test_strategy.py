@@ -87,6 +87,7 @@ class StrategyOperationTests(unittest.TestCase):
     def setUp(self):
         self.session = Mock()
         self.session.supply_reader.return_value.page.return_value = False
+        self.session.encounter_reader.return_value.page.return_value = False
         self.session.save_image.side_effect = lambda frame: {"screenshot": f"{frame}.png"}
         self.job = self.session.controller.post_screencap.return_value.wait.return_value
         self.job.succeeded = True
@@ -215,28 +216,7 @@ class StrategyOperationTests(unittest.TestCase):
         with self.assertRaisesRegex(InputUncertain, "OSError"):
             self.op.run("refresh", 1)
 
-    def test_preparation_wait_resumes_slots_from_confirmed_frame(self):
-        self.reader.page.return_value = False
-        self.reader.following.return_value = {"result": "success", "screen": "备战", "shop": "closed"}
-        self.session.preparation.observe.return_value = {"result": "success", "slots": {"front_1": None}, "gold": 8}
-        self.job.get.return_value = "ready"
-        result = self.op.run("preparation", image="initial")
-        self.assertEqual(result["slots"], {"front_1": None})
-        self.session.preparation.observe.assert_called_once_with("ready")
-        self.assertEqual(result["gold"], 8)
-        self.reader.following.assert_called_once_with("ready")
 
-    def test_preparation_wait_dispatches_supply_and_keeps_its_latest_frame(self):
-        self.reader.page.return_value = False
-        self.session.supply_reader.return_value.page.return_value = True
-        with patch("screens.supply.SupplyOperation") as operation:
-            operation.return_value.execute.return_value = {"result": "success", "screen": "补给"}
-            operation.return_value.image = "complete-supply"
-            result = self.op.save(self.op.execute("preparation", image="initial"))
-        operation.return_value.execute.assert_called_once_with(image="frame")
-        self.assertEqual(result["screen"], "补给")
-        self.assertEqual(result["screenshot"], "complete-supply.png")
-        self.reader.following.assert_not_called()
 
 
 class StrategySessionTests(unittest.TestCase):
@@ -253,18 +233,6 @@ class StrategySessionTests(unittest.TestCase):
         self.assertEqual(operation.call_count, 2)
         operation.return_value.execute.assert_has_calls([call("read", None, None), call("refresh", 2, None)])
 
-    def test_preparation_failure_passes_same_frame_to_dispatch(self):
-        session = Session(1, "framepool")
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = None
-        session.supply = Mock()
-        session.supply.page.return_value = False
-        session.preparation_frame = Mock(return_value="frame")
-        session.preparation = Mock()
-        session.preparation.recognize.return_value = {"result": "uncertain", "screen": "未知"}
-        session.investment_strategy = Mock(return_value={"screen": "投资策略"})
-        self.assertEqual(session.observe_preparation()["screen"], "投资策略")
-        session.investment_strategy.assert_called_once_with("preparation", image="frame")
 
 
 if __name__ == "__main__":

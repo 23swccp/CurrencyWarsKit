@@ -9,7 +9,7 @@ from PIL import Image
 
 from game.equipment import ASSETS, Equipment
 from recognition_debug import trace
-from screens.inventory import AREA, Inventory
+from screens.inventory import AREA, BOTH_COLUMNS, Inventory
 from screens.preparation import Preparation
 
 
@@ -51,7 +51,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["bag_r3_c1"]["id"], "solar_battery")
         self.assertEqual(result["bag_r6_c1"]["id"], "solar_battery")
 
-    def test_items_to_the_left_preserve_current_right_column_ids(self):
+    def test_items_outside_both_columns_are_ignored(self):
         image = sample()
         expected = self.reader.read(image)
         image[200:710, 1704:1790] = image[200:710, 1804:1890]
@@ -84,8 +84,11 @@ class InventoryTests(unittest.TestCase):
         reader.action_button = Mock(return_value={"button_text": "出战", "next_action": "start-battle"})
         reader.capacity_warning = Mock(return_value={})
         reader.numbers = Mock(return_value={"result": "uncertain", "gold": None})
-        reader.slots = Mock(return_value={"slots": {"front_1": None, **{f"bench_{i}": None for i in range(1, 10)}}})
+        reader.slots = Mock(return_value={"slots": {"front_1": None, **{f"bench_{i}": None for i in range(1, 10)}},
+                                        "backstage_count": 6})
         reader.inventory = self.reader
+        reader.emblems = Mock()
+        reader.emblems.read.return_value = {}
         image = sample()
         observer = Mock()
         with trace(observer):
@@ -95,7 +98,7 @@ class InventoryTests(unittest.TestCase):
         reader.numbers.assert_called_once_with(image)
         reader.slots.assert_called_once_with(image)
         calls = observer.mark.call_args_list
-        self.assertEqual(calls[0].args[1:], (AREA, "右侧库存定位", "crop"))
+        self.assertEqual(calls[0].args[1:], (BOTH_COLUMNS, "右侧库存定位", "crop"))
         self.assertEqual(len(calls), 7)
         for call, (slot, item) in zip(calls[1:], result["inventory"].items()):
             x, y, width, height = item["box"]

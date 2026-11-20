@@ -1,9 +1,11 @@
 """备战数值解析、同帧读取与 OCR 错误。"""
 
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
+from PIL import Image
 
 from flow.prepare import PreparationFlow
 from game.slots import NUMBERS
@@ -18,6 +20,15 @@ def texts(**changes):
 
 
 class NumberTests(unittest.TestCase):
+    def test_gold_region_reads_three_digits_from_saved_preparation_frame(self):
+        path = Path(__file__).parent / "fixtures" / "armament" / "advanced-bench.webp"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        reader.load_ocr()
+        self.assertEqual(reader.integer(image, "gold", NUMBERS["gold"]), 132)
+
     def test_zero_and_whitespace_are_parsed_from_all_five_fields(self):
         result = parse_numbers(texts(gold=" 0 ", experience="0 / 20", level="Lv. 5"))
         self.assertEqual(result, {"result": "success", "gold": 0, "level": 5,
@@ -92,9 +103,11 @@ class NumberTests(unittest.TestCase):
         reader.action_button = Mock(return_value={"button_text": "出战", "next_action": "start-battle"})
         reader.capacity_warning = Mock(return_value={})
         slots = {"front_1": None, **{f"bench_{i}": None for i in range(1, 10)}}
-        reader.slots = Mock(return_value={"slots": slots})
+        reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         reader.inventory = Mock()
         reader.inventory.read.return_value = None
+        reader.emblems = Mock()
+        reader.emblems.read.return_value = {}
         reader.numbers = Mock(side_effect=[parse_numbers(texts()), parse_numbers(texts(gold=""))])
         first, second = object(), object()
         self.assertEqual(reader.observe(first)["gold"], 31)
@@ -105,37 +118,22 @@ class NumberTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in reader.slots.call_args_list], [first, second])
         self.assertEqual([call.args[0] for call in reader.numbers.call_args_list], [first, second])
 
-    def test_incomplete_numbers_stay_on_preparation_without_strategy_dispatch(self):
-        session = Session(1, "framepool")
-        image = object()
-        session.preparation_frame = Mock(return_value=image)
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = None
-        session.supply = Mock()
-        session.supply.page.return_value = False
-        session.preparation = Mock()
-        session.preparation.recognize.return_value = {"screen": "备战", "slots": {},
-                                                     **parse_numbers(texts(gold=""))}
-        session.investment_strategy = Mock()
-        session.save_image = Mock(return_value={"screenshot": "frame.png"})
-        result = session.observe_preparation()
-        self.assertEqual(result["result"], "uncertain")
-        self.assertEqual(result["screen"], "备战")
-        self.assertIsNone(result["gold"])
-        session.save_image.assert_called_once_with(image)
-        session.investment_strategy.assert_not_called()
 
     def test_prepare_reads_numbers_once_after_collection_and_does_not_retry_partial_values(self):
         session = Mock()
-        session.protagonist_reader.return_value.stage.return_value = None
+        session.protagonist_reader.return_value.selection_page.return_value = False
         session.supply_reader.return_value.page.return_value = False
+        session.encounter_reader.return_value.page.return_value = False
+        session.strategy_reader.return_value.page.return_value = False
         job = session.controller.post_screencap.return_value.wait.return_value
         job.succeeded = True
         job.get.side_effect = ["before", "after"]
+        session.preparation_reader.return_value.score.return_value = 0
+        session.preparation_reader.return_value.action_button.return_value = {"next_action": None}
         session.preparation_reader.return_value.observe.return_value = {
             "slots": {"front_1": None}, **parse_numbers(texts(experience=""))}
         session.save_image.return_value = {"screenshot": "after.png"}
-        with patch("flow.prepare.layout", return_value={"result": "success", "screen": "备战", "shop": "closed"}), \
+        with patch("flow.preparation_scene.layout", return_value={"result": "success", "screen": "备战", "shop": "closed"}), \
                 patch("flow.prepare.sweep") as sweep:
             result = PreparationFlow(session).enter()
         self.assertEqual(result["result"], "uncertain")

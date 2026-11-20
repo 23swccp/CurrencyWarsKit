@@ -1,15 +1,18 @@
 """备战识别与只读观察测试。"""
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Barrier, Event, get_ident
 import unittest
 from unittest.mock import Mock, call, patch
 
 import numpy as np
+from PIL import Image
 
+from recognition_debug import trace
 from screens.preparation import Preparation, Recognition
 from service import Session
-from game.slots import ACTION_BUTTON, BENCH_WARNING, CARDS, ICONS, PHASE, SHOP
+from game.slots import ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, FRONT, ICONS, PHASE, SHOP
 
 
 class PreparationTests(unittest.TestCase):
@@ -23,6 +26,8 @@ class PreparationTests(unittest.TestCase):
         self.reader.action_button = Mock(return_value={"button_text": "出战", "next_action": "start-battle"})
         self.reader.inventory = Mock()
         self.reader.inventory.read.return_value = None
+        self.reader.emblems = Mock()
+        self.reader.emblems.read.return_value = {}
         self.reader.portraits = [("云璃", [None, None]), ("火花", [None, None])]
         self.reader.workers = [(Mock(), self.reader.portraits)]
         self.reader.pool = ThreadPoolExecutor(max_workers=4)
@@ -37,6 +42,26 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(result["result"], "uncertain")
         self.assertNotIn("slots", result)
         self.reader.match.assert_not_called()
+
+    def test_observation_returns_active_trait_and_recruit_candidates(self):
+        slots = {slot: None for slot in CARDS}
+        slots.update(front_1={"name": "那刻夏"}, back_1={"name": "白露"}, bench_1={"name": "星期日"})
+        self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
+        self.reader.score.return_value = 0.9
+        self.reader.emblems.read.return_value = {"front_1": ["interwoven_dreams_emblem"]}
+
+        result = self.reader.recognize(self.image)["trait_projection"]
+
+        self.reader.emblems.read.assert_called_once_with(self.image, slots)
+        self.assertEqual(result["basis"], "native_and_emblems")
+        self.assertIn("梦境交织", [trait["name"] for trait in result["current"]])
+        chain = next(trait for trait in result["current"] if trait["name"] == "连击")
+        self.assertEqual(chain, {"name": "连击", "members": ["front_1", "back_1"], "count": 2,
+                                 "tier": 2, "next_tier": 4})
+        plan = next(option for option in result["combinations"] if option["name"] == "连击")
+        self.assertEqual((plan["target_tier"], plan["needed"]), (4, 2))
+        self.assertIn("星期日", plan["candidates"])
+        self.assertNotIn("那刻夏", plan["candidates"])
 
     def test_ocr_title_and_shop_at_threshold_pass_without_icons(self):
         self.reader.score = Mock(return_value=0.9)
@@ -92,21 +117,97 @@ class PreparationTests(unittest.TestCase):
             self.reader.recognize(self.image[:720, :1280])
         self.reader.score.assert_not_called()
 
+    def backstage_frame(self, name):
+        fixture = Path(__file__).with_name("fixtures") / "preparation" / f"backstage-{name}.png"
+        with Image.open(fixture) as band:
+            self.image[593:602] = np.asarray(band)[:, :, ::-1]
+        return self.image
+
     def test_empty_and_unknown_slots_are_distinct(self):
-        self.reader.score = Mock(side_effect=[0.9, 0.2] + [1] * 18 + [0])
+        self.reader.score = Mock(side_effect=[0.9, 0.699] + [0.9] * 18 + [0])
         self.reader.match = Mock(return_value={"unknown": True, "candidates": []})
-        slots = self.reader.recognize(self.image)["slots"]
+        slots = self.reader.recognize(self.backstage_frame("six"))["slots"]
         self.assertEqual(set(slots), set(CARDS))
         self.assertTrue(slots["front_1"]["unknown"])
+        self.assertIsNone(slots["front_1"]["stars"])
         self.assertTrue(all(value is None for slot, value in slots.items() if slot != "front_1"))
         self.reader.match.assert_called_once()
+
+    def test_observation_reads_gold_and_blue_stars_independently_of_identity(self):
+        image = self.backstage_frame("seven")
+        fixture = Path(__file__).with_name("fixtures") / "preparation" / "front-stars.png"
+        with Image.open(fixture) as band:
+            image[425:470, 677:1242] = np.asarray(band)[:, :, ::-1]
+        self.reader.score.return_value = 0.9
+        self.reader.empty = Mock(side_effect=lambda image, slot, backstage: not slot.startswith("front_"))
+        self.reader.match = Mock(side_effect=[{"unknown": True, "candidates": []}]
+                                 + [{"name": "云璃"}] * 3)
+        observer = Mock()
+
+        with trace(observer):
+            slots = self.reader.recognize(image)["slots"]
+
+        fronts = [slots[f"front_{index}"] for index in range(1, 5)]
+        self.assertEqual([card["stars"] for card in fronts], [3, 3, 2, 1])
+        self.assertTrue(fronts[0]["unknown"])
+        self.assertEqual(fronts[1]["name"], "云璃")
+        observer.mark.assert_any_call(image, (697, 427, 91, 40), "front_1 星级", "crop")
 
     def test_same_character_can_occupy_multiple_slots(self):
         self.reader.score = Mock(side_effect=[0.9, 0.2, 0.2] + [1] * 17 + [0])
         self.reader.match = Mock(return_value={"name": "云璃"})
-        slots = self.reader.recognize(self.image)["slots"]
+        slots = self.reader.recognize(self.backstage_frame("six"))["slots"]
         self.assertEqual(slots["front_1"]["name"], "云璃")
         self.assertEqual(slots["front_2"]["name"], "云璃")
+
+    def test_seven_backstage_matches_vacancies_in_real_frame_regions(self):
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        reader.match = Mock(return_value={"unknown": True, "candidates": []})
+        image = self.backstage_frame("seven")
+        fixtures = Path(__file__).with_name("fixtures") / "preparation"
+        for name, first_vacant in (("vacant", 4), ("occupied", 6)):
+            with self.subTest(name=name), Image.open(fixtures / f"backstage-seven-{name}.png") as band:
+                image[641:699, 510:1410] = np.asarray(band.convert("RGB"))[:, :, ::-1]
+                result = reader.slots(image)
+                self.assertEqual(result["backstage_count"], 7)
+                slots = result["slots"]
+                for index in range(1, first_vacant):
+                    self.assertTrue(slots[f"back_{index}"]["unknown"])
+                for index in range(first_vacant, 8):
+                    self.assertIsNone(slots[f"back_{index}"])
+
+    def test_seven_backstage_without_empty_template_does_not_guess_vacancy(self):
+        self.reader.score.return_value = 1
+        self.reader.match = Mock(return_value={"unknown": True, "candidates": []})
+        for index in range(1, 4):
+            self.assertTrue(self.reader.card(self.image, f"back_{index}", 7)["unknown"])
+        self.reader.score.assert_not_called()
+
+    def test_unconfirmed_backstage_preserves_known_coordinates_and_partial_traits(self):
+        self.reader.score.side_effect = lambda image, name, roi: 0 if name == "front_1.png" else 0.9
+        self.reader.match = Mock(return_value={"name": "那刻夏"})
+        self.reader.inventory.read.return_value = {"bag_r1_c1": {"id": "antigravity_boots"}}
+        self.reader.numbers.return_value = {"result": "success", "gold": 31}
+
+        result = self.reader.observe(self.image)
+
+        self.assertEqual(result["result"], "uncertain")
+        self.assertIsNone(result["backstage_count"])
+        self.assertEqual(set(result["slots"]), set(FRONT) | set(BENCH))
+        self.assertEqual(result["slots"]["front_1"]["name"], "那刻夏")
+        self.assertIsNone(result["slots"]["bench_9"])
+        self.assertEqual(result["gold"], 31)
+        self.assertEqual(result["reason"], "character_overflow")
+        self.assertEqual(result["inventory"], self.reader.inventory.read.return_value)
+        self.reader.emblems.read.assert_called_once_with(self.image, result["slots"])
+        self.assertFalse(any(call.args[1].startswith("back_") for call in self.reader.score.call_args_list))
+        traits = result["trait_projection"]
+        self.assertTrue(traits["partial"])
+        self.assertEqual(traits["combinations"], [])
+        chain = next(trait for trait in traits["current"] if trait["name"] == "连击")
+        self.assertEqual(chain, {"name": "连击", "members": ["front_1"], "count": 1,
+                                 "tier": None, "next_tier": None})
 
     def test_full_bench_and_warning_require_sale_with_known_or_unknown_field(self):
         for card in ({"name": "云璃"}, {"unknown": True, "candidates": []}):
@@ -114,7 +215,7 @@ class PreparationTests(unittest.TestCase):
                 slots = {name: None for name in CARDS}
                 slots.update({f"bench_{i}": {"name": "云璃"} for i in range(1, 10)})
                 slots["front_4"] = card
-                self.reader.slots = Mock(return_value={"slots": slots})
+                self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
                 self.reader.score = Mock(return_value=0.9)
                 result = self.reader.observe(self.image)
                 self.assertEqual(result["reason"], "character_overflow")
@@ -128,7 +229,7 @@ class PreparationTests(unittest.TestCase):
     def test_warning_with_bench_vacancy_still_requires_sale(self):
         slots = {name: {"name": "云璃"} for name in CARDS}
         slots.update(bench_9=None, front_4={"unknown": True})
-        self.reader.slots = Mock(return_value={"slots": slots})
+        self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         self.reader.score.return_value = 1
         result = self.reader.observe(self.image)
         self.assertEqual(result["reason"], "character_overflow")
@@ -136,14 +237,14 @@ class PreparationTests(unittest.TestCase):
         self.reader.score.assert_called_once_with(self.image, "bench_warning.png", BENCH_WARNING)
 
     def test_no_warning_with_bench_vacancy_has_no_capacity_request(self):
-        self.reader.slots = Mock(return_value={"slots": {name: None for name in CARDS}})
+        self.reader.slots = Mock(return_value={"slots": {name: None for name in CARDS}, "backstage_count": 6})
         result = self.reader.observe(self.image)
         self.assertNotIn("reason", result)
         self.assertNotIn("required_action", result)
 
     def test_full_bench_and_all_unknown_field_without_warning_is_normal_full(self):
         slots = {name: {"unknown": True} for name in CARDS}
-        self.reader.slots = Mock(return_value={"slots": slots})
+        self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         self.reader.score.return_value = 0.899
         result = self.reader.observe(self.image)
         self.assertEqual(result["reason"], "bench_full")
@@ -153,7 +254,7 @@ class PreparationTests(unittest.TestCase):
         slots = {name: None for name in CARDS}
         slots.update({f"bench_{i}": {"name": "云璃"} for i in range(1, 10)})
         slots["bench_6"] = {"unknown": True}
-        self.reader.slots = Mock(return_value={"slots": slots})
+        self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         result = self.reader.observe(self.image)
         self.assertEqual(result["reason"], "bench_full")
         self.assertTrue(result["needs_ai"])
@@ -162,7 +263,7 @@ class PreparationTests(unittest.TestCase):
     def test_overflow_sale_request_survives_missing_numbers(self):
         slots = {name: {"name": "云璃"} for name in CARDS}
         slots["back_4"] = {"unknown": True}
-        self.reader.slots = Mock(return_value={"slots": slots})
+        self.reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         self.reader.score.return_value = 1
         self.reader.numbers.return_value = {"result": "uncertain", "level": None,
                                            "message": "备战数值待确认"}
@@ -226,28 +327,6 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "模板识别出错"):
             Recognition.score(self.reader, self.image, "shop.png")
 
-    def test_capture_and_result_use_same_frame_and_cached_reader(self):
-        session = Session(1, "framepool")
-        session.supply = Mock()
-        session.supply.page.return_value = False
-        session.protagonist = Mock()
-        session.protagonist.stage.return_value = None
-        session.controller = Mock()
-        job = session.controller.post_screencap.return_value.wait.return_value
-        job.succeeded = True
-        job.get.return_value = self.image
-        session.save_image = Mock(return_value={"screenshot": "frame.png"})
-        with patch("screens.preparation.Preparation") as reader:
-            reader.return_value.recognize.return_value = {"result": "success", "screen": "备战"}
-            for _ in range(2):
-                self.assertEqual(session.observe_preparation()["screenshot"], "frame.png")
-            reader.assert_called_once_with()
-            self.assertTrue(all(call.args[0] is self.image for call in reader.return_value.recognize.call_args_list))
-        self.assertTrue(all(call.args[0] is self.image for call in session.save_image.call_args_list))
-        session.controller.post_click.assert_not_called()
-        job.succeeded = False
-        with self.assertRaisesRegex(RuntimeError, "备战截图失败"):
-            session.observe_preparation()
 
 
 if __name__ == "__main__":

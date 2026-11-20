@@ -23,7 +23,7 @@ def sell(session, source):
                 "message": "售卖要求商店收起的备战画面"}
     card = reader.card(image, source)
     # 防：来源为空或角色未确认。
-    if card is None or "unknown" in card:
+    if card is None or "name" not in card:
         return {**session.save_image(image), "result": "failed", "screen": "备战", "needs_ai": True,
                 "message": "来源角色待确认", "slots": {source: card}}
     gold = reader.integer(image, "gold", NUMBERS["gold"])

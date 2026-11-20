@@ -2,13 +2,11 @@
 
 from time import sleep
 
-from game.input import ERRORS, InputUncertain, uncertain
-from screens.preparation import layout
-from screens.protagonist import ProtagonistOperation, complete as protagonist_complete
+from flow.preparation_scene import identify, read_choice
 from flow.rewards import sweep
+from game.input import ERRORS, InputUncertain, uncertain
 from game.slots import BLANK, SHOP_TOGGLE
-from screens.strategy import complete
-from screens.supply import complete as supply_complete
+from screens.protagonist import ProtagonistOperation
 
 
 ATTEMPTS = 3
@@ -20,9 +18,6 @@ class PreparationFlow:
     def __init__(self, session):
         self.session = session
         self.reader = session.preparation_reader()
-        self.strategy = session.strategy_reader()
-        self.protagonist = session.protagonist_reader()
-        self.supply = session.supply_reader()
         self.collected = False
         self.image = None
         self.clicked = False
@@ -35,23 +30,10 @@ class PreparationFlow:
         return job.get()
 
     def inspect(self, image):
-        stage = self.protagonist.stage(image)
-        if stage == "entry":
-            return {"result": "success", "screen": "选择主角", "stage": stage, "needs_ai": True,
-                    **self.reader.action_button(image), "node": self.reader.header(image)["node"]}
-        if stage == "selection":
-            result = self.protagonist.read(image)
-            return {**result, "result": "success" if protagonist_complete(result) else "uncertain"}
-        if self.supply.page(image):
-            result = self.supply.read(image)
-            return {**result, "result": "success" if supply_complete(result) else "uncertain"}
-        result = layout(image, self.reader)
-        if result is not None:
-            return result
-        if self.strategy.page(image):
-            result = self.strategy.read(image)
-            return {**result, "result": "success" if complete(result) else "uncertain"}
-        return {"result": "uncertain", "screen": "未知"}
+        scene = identify(self.session, image)
+        if scene is None:
+            return {"result": "uncertain", "screen": "未知"}
+        return read_choice(self.session, image, scene)
 
     def dismiss(self):
         if self.blank_clicks == BLANK_CLICKS:
@@ -65,8 +47,7 @@ class PreparationFlow:
         for elapsed in range(INTERVAL, delay, INTERVAL):
             sleep(INTERVAL)
             self.image = self.capture()
-            if (self.protagonist.stage(self.image) is not None or self.supply.page(self.image)
-                    or layout(self.image, self.reader) is not None or self.strategy.page(self.image)):
+            if identify(self.session, self.image) is not None:
                 sleep(delay - elapsed)
                 return
             self.dismiss()
@@ -99,7 +80,7 @@ class PreparationFlow:
 
     def open_protagonist(self, result):
         if result["screen"] == "选择主角" and result.get("stage") == "entry":
-            operation = ProtagonistOperation(self.session, self.protagonist)
+            operation = ProtagonistOperation(self.session, self.session.protagonist_reader())
             result = operation.execute("open", image=self.image, observation=result)
             self.image = operation.image
             self.clicked = self.clicked or operation.clicked

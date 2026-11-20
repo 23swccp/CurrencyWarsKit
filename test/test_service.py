@@ -13,6 +13,9 @@ import threading
 import unittest
 from unittest.mock import Mock, call, patch
 
+import numpy as np
+from PIL import Image
+
 import service
 import cw
 
@@ -122,12 +125,14 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(data["result"], "failed")
 
     def test_every_cli_command_has_a_route(self):
-        commands = {"status", "stop", "resync", "screenshot", "navigate", "preparation",
-                    "prepare", "strategy", "supply", "protagonist", "battle", "overlay", "rewards", "shop"}
+        commands = {"status", "stop", "resync", "screenshot", "navigate", "observe",
+                    "prepare", "overlay", "rewards"}
         actions = {"click", "drag", "press", "move", "collect", "start-battle", "continue-battle",
                    "environment", "strategy-refresh", "strategy-choose", "protagonist-open",
                    "protagonist-character", "protagonist-aura", "protagonist-refresh",
-                   "protagonist-confirm", "sell", "shop-open", "shop-close", "refresh", "supply-refresh", "supply-choose"}
+                   "protagonist-confirm", "sell", "shop-open", "shop-close", "refresh", "supply-refresh", "supply-choose",
+                   "encounter-refresh", "encounter-choose", "armament-open", "armament-choose", "buy-experience",
+                   "trail-shop-open", "trail-shop-buy", "trail-shop-close"}
         self.assertEqual({path[1:] for path in service.ROUTES} | {"stop"}, commands | actions)
 
     def test_busy_requests_do_not_capture(self):
@@ -159,8 +164,6 @@ class HttpTests(unittest.TestCase):
 
     def test_shop_read_and_refresh_are_serialized(self):
         session = self.server.session
-        session.observe_shop = Mock(return_value={"result": "success", "refresh_mode": "free", "free_refreshes": 1})
-        self.assertEqual(service.request("shop", info=self.info)["free_refreshes"], 1)
         session.refresh_shop = Mock(return_value={"result": "success", "action": "refresh"})
         self.assertEqual(service.request("refresh", info=self.info)["result"], "success")
         with session.operation_lock:
@@ -170,15 +173,14 @@ class HttpTests(unittest.TestCase):
     def test_supply_read_refresh_and_choice_use_operation_lock(self):
         session = self.server.session
         session.supply_action = Mock(return_value={"result": "success", "screen": "补给"})
-        for command, data, expected in (("supply", {}, call()),
-                                        ("supply-refresh", {}, call("refresh")),
+        for command, data, expected in (("supply-refresh", {}, call("refresh")),
                                         ("supply-choose", {"option": 4}, call("choose", 4))):
             with self.subTest(command=command):
                 self.assertEqual(service.request(command, info=self.info, data=data)["screen"], "补给")
                 self.assertEqual(session.supply_action.call_args, expected)
                 with session.operation_lock:
                     self.assertEqual(service.request(command, info=self.info, data=data)["result"], "busy")
-        self.assertEqual(session.supply_action.call_count, 3)
+        self.assertEqual(session.supply_action.call_count, 2)
 
     def test_stop_is_accepted_while_capture_is_running(self):
         entered, release = threading.Event(), threading.Event()
@@ -208,17 +210,17 @@ class HttpTests(unittest.TestCase):
                              {"result": "success", "screenshot": "fixture.png"})
         self.assertNotIn("state", service.request("status", info=self.info))
 
-    def test_preparation_is_serialized_read_only_observation(self):
-        self.server.session.observe_preparation = Mock(return_value={"screen": "备战", "slots": {"front_1": None},
+    def test_observe_is_serialized_read_only_observation(self):
+        self.server.session.observe = Mock(return_value={"screen": "备战", "slots": {"front_1": None},
             "node": "3-4", "phase_box": [430, 33, 80, 24]})
-        result = service.request("preparation", info=self.info)
+        result = service.request("observe", info=self.info)
         self.assertEqual(result["slots"]["front_1"], None)
         self.assertEqual(result["screen"], "备战")
         self.assertEqual(result["node"], "3-4")
         self.assertEqual(result["phase_box"], [430, 33, 80, 24])
         with self.server.session.operation_lock:
-            self.assertEqual(service.request("preparation", info=self.info)["result"], "busy")
-        self.server.session.observe_preparation.assert_called_once_with()
+            self.assertEqual(service.request("observe", info=self.info)["result"], "busy")
+        self.server.session.observe.assert_called_once_with()
 
     def test_collect_uses_operation_lock_and_returns_frame(self):
         self.server.session.collect_rewards = Mock(return_value={"result": "uncertain", "screenshot": "after.png"})
@@ -238,18 +240,10 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(service.request("start-battle", info=self.info)["result"], "busy")
         session.start_battle.assert_called_once_with()
 
-    def test_battle_observation_is_serialized(self):
-        session = self.server.session
-        session.observe_battle = Mock(return_value={"screen": "战斗", "screenshot": "screens.battle.png"})
-        self.assertEqual(service.request("battle", info=self.info)["screen"], "战斗")
-        with session.operation_lock:
-            self.assertEqual(service.request("battle", info=self.info)["result"], "busy")
-        session.observe_battle.assert_called_once_with()
-
     def test_strategy_routes_are_serialized(self):
         session = self.server.session
         session.investment_strategy = Mock(return_value={"result": "success", "screen": "投资策略", "needs_ai": True})
-        for command, payload, args in (("strategy", {}, ()), ("strategy-refresh", {"option": 2}, ("refresh", 2)),
+        for command, payload, args in (("strategy-refresh", {"option": 2}, ("refresh", 2)),
                                        ("strategy-choose", {"option": 3}, ("choose", 3))):
             with self.subTest(command=command):
                 session.investment_strategy.reset_mock()
@@ -276,7 +270,7 @@ class HttpTests(unittest.TestCase):
     def test_protagonist_routes_are_serialized(self):
         session = self.server.session
         session.protagonist_action = Mock(return_value={"result": "success", "screen": "选择主角"})
-        for command, data, args in (("protagonist", {}, ()), ("protagonist-open", {}, ("open",)),
+        for command, data, args in (("protagonist-open", {}, ("open",)),
                                     ("protagonist-character", {"slot": "front_1"}, ("character",)),
                                     ("protagonist-aura", {"option": 2}, ("aura",)),
                                     ("protagonist-refresh", {"option": 1}, ("refresh",)),
@@ -366,6 +360,36 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(result["result"], "failed")
         session.controller.post_swipe.assert_not_called()
 
+    def test_move_reads_backstage_coordinates_from_the_current_frame(self):
+        session = self.server.session
+        session.controller = Mock()
+        session.controller.post_swipe.return_value.wait.return_value.succeeded = True
+        session.preparation = Mock()
+        session.preparation.page.return_value = {"result": "success", "screen": "备战"}
+        session.preparation_frame = Mock()
+        session.save_image = Mock(return_value={"screenshot": "before.png"})
+        image = np.zeros((1080, 1920, 3), dtype="uint8")
+        session.preparation_frame.return_value = image
+        payload = {"from": "back_4", "to": "back_7"}
+        fixtures = Path(__file__).with_name("fixtures") / "preparation"
+        with Image.open(fixtures / "backstage-seven.png") as band:
+            image[593:602] = np.asarray(band)[:, :, ::-1]
+        result = service.request("move", info=self.info, data=payload)
+        self.assertEqual(result["screenshot"], "fixture.png")
+        self.assertEqual(result["result"], "uncertain")
+        session.controller.post_swipe.assert_called_once_with(960, 670, 1389, 670, 700)
+        session.controller.post_swipe.reset_mock()
+
+        with Image.open(fixtures / "backstage-six.png") as band:
+            image[593:602] = np.asarray(band)[:, :, ::-1]
+        result = service.request("move", info=self.info, data=payload)
+        self.assertEqual(result["result"], "failed")
+        image[593:602] = 0
+        result = service.request("move", info=self.info, data=payload)
+        self.assertEqual(result["screenshot"], "before.png")
+        self.assertEqual(result["result"], "uncertain")
+        session.controller.post_swipe.assert_not_called()
+
     def test_drag_and_press_publish_snapshots(self):
         session = self.server.session
         session.image_size = (100, 50)
@@ -414,8 +438,7 @@ class HttpTests(unittest.TestCase):
 
 class CliTests(unittest.TestCase):
     def test_supply_commands_send_intent_and_option(self):
-        for argv, command, kwargs in ((["supply"], "supply", {}),
-                                      (["act", "supply", "--option", "4"], "supply-choose", {"data": {"option": 4}}),
+        for argv, command, kwargs in ((["act", "supply", "--option", "4"], "supply-choose", {"data": {"option": 4}}),
                                       (["act", "supply-refresh"], "supply-refresh", {"data": {}})):
             with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", *argv]), \
                     patch.object(service, "INFO", Mock()), patch("cw.output"), \
@@ -425,9 +448,10 @@ class CliTests(unittest.TestCase):
 
     def test_sell_shop_and_rewards_send_expected_requests(self):
         cases = ((["act", "sell", "--from", "bench_8"], "sell", {"data": {"from": "bench_8"}}),
+                 (["act", "move", "--from", "bench_2", "--to", "back_7"], "move",
+                  {"data": {"from": "bench_2", "to": "back_7"}}),
                  (["act", "shop-open"], "shop-open", {"data": {}}),
                  (["act", "shop-close"], "shop-close", {"data": {}}),
-                 (["shop"], "shop", {}),
                  (["act", "refresh"], "refresh", {"data": {}}),
                  (["rewards"], "rewards", {}))
         for argv, command, kwargs in cases:
@@ -438,8 +462,7 @@ class CliTests(unittest.TestCase):
                 request.assert_called_once_with(command, **kwargs)
 
     def test_protagonist_commands_send_intent_and_targets(self):
-        commands = ((["protagonist"], "protagonist", None),
-                    (["act", "protagonist-open"], "protagonist-open", {}),
+        commands = ((["act", "protagonist-open"], "protagonist-open", {}),
                     (["act", "protagonist-character", "--slot", "front_1"], "protagonist-character", {"slot": "front_1"}),
                     (["act", "protagonist-aura", "--option", "2"], "protagonist-aura", {"option": 2}),
                     (["act", "protagonist-refresh", "--option", "1"], "protagonist-refresh", {"option": 1}),
@@ -468,11 +491,19 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(cw.main(), 0)
                 request.assert_called_once_with(command, **kwargs)
 
-    def test_battle_sends_observation_request(self):
-        with patch.object(sys, "argv", ["cw", "battle"]), patch.object(service, "INFO", Mock()), \
+    def test_buy_experience_sends_requested_amount(self):
+        with (patch.object(sys, "argv", ["cw", "act", "buy-experience", "--xp", "12"]),
+              patch.object(service, "INFO", Mock()),
+              patch.object(service, "request", return_value={"result": "success"}) as request,
+              patch.object(cw, "output")):
+            self.assertEqual(cw.main(), 0)
+        request.assert_called_once_with("buy-experience", data={"xp": 12})
+
+    def test_observe_sends_observation_request(self):
+        with patch.object(sys, "argv", ["cw", "observe"]), patch.object(service, "INFO", Mock()), \
                 patch.object(cw, "output"), patch.object(service, "request", return_value={"result": "success"}) as request:
             self.assertEqual(cw.main(), 0)
-        request.assert_called_once_with("battle")
+        request.assert_called_once_with("observe")
 
     def test_start_battle_sends_empty_payload(self):
         with patch.object(sys, "argv", ["cw", "act", "start-battle"]), \
@@ -482,8 +513,7 @@ class CliTests(unittest.TestCase):
         request.assert_called_once_with("start-battle", data={})
 
     def test_strategy_commands_send_intent_and_option(self):
-        for argv, command, payload in ((["strategy"], "strategy", None),
-                                      (["act", "strategy", "--option", "3"], "strategy-choose", {"option": 3}),
+        for argv, command, payload in ((["act", "strategy", "--option", "3"], "strategy-choose", {"option": 3}),
                                       (["act", "strategy-refresh", "--option", "1"], "strategy-refresh", {"option": 1})):
             with self.subTest(argv=argv), patch.object(sys, "argv", ["cw", *argv]), \
                     patch.object(service, "INFO", Mock()), patch.object(cw, "output"), \
@@ -521,6 +551,11 @@ class CliTests(unittest.TestCase):
             ["strategy", "--option", "0"],
             ["strategy-refresh", "--option", "4"],
             ["strategy"],
+            ["buy-experience", "--xp", "0"],
+            ["buy-experience", "--xp", "-4"],
+            ["buy-experience", "--xp", "6"],
+            ["trail-shop-buy", "--slot", "0"],
+            ["trail-shop-buy", "--slot", "5"],
         ]
         for args in cases:
             with self.subTest(args=args):

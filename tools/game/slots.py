@@ -1,29 +1,36 @@
 """1920×1080 商店收起时的备战布局。"""
 
-CENTERS = {
-    "front": ((746, 398), (888, 398), (1031, 398), (1176, 398)),
-    "back": ((605, 670), (746, 670), (889, 670), (1032, 670), (1175, 670), (1318, 670)),
-    "bench": tuple((438 + 125 * index, 905) for index in range(9)),
+FRONT = {f"front_{index}": (x, 398) for index, x in enumerate((746, 888, 1031, 1176), 1)}
+BENCH = {f"bench_{index + 1}": (438 + 125 * index, 905) for index in range(9)}
+BACK_X = {6: (605, 746, 889, 1032, 1175, 1318),
+          7: (534, 675, 817, 960, 1103, 1246, 1389)}
+SLOTS_BY_BACKSTAGE = {
+    count: {**FRONT, **{f"back_{index}": (x, 670) for index, x in enumerate(xs, 1)}, **BENCH}
+    for count, xs in BACK_X.items()
 }
-
-SLOTS = {f"{area}_{index}": point for area, points in CENTERS.items()
-         for index, point in enumerate(points, 1)}
+SLOTS = SLOTS_BY_BACKSTAGE[6]
 
 # 卡片四角按左上、左下、右下、右上排列。
-CARDS = {}
+FRONT_CARDS, BENCH_CARDS = {}, {}
 for index in range(4):
     top, bottom = 690 + 140 * index, 678 + 146 * index
-    CARDS[f"front_{index + 1}"] = (top, 341, bottom, 470, bottom + 126, 470, top + 120, 341)
-for index in range(6):
-    top, bottom = 550 + 140 * index, 532 + 146 * index
-    CARDS[f"back_{index + 1}"] = (top, 598, bottom, 731, bottom + 129, 731, top + 123, 598)
+    FRONT_CARDS[f"front_{index + 1}"] = (top, 341, bottom, 470, bottom + 126, 470, top + 120, 341)
 for index in range(9):
     left = 382 + 125 * index
-    CARDS[f"bench_{index + 1}"] = (left, 845, left, 979, left + 114, 979, left + 114, 845)
+    BENCH_CARDS[f"bench_{index + 1}"] = (left, 845, left, 979, left + 114, 979, left + 114, 845)
+
+BACK_SIX = [(550 + 140 * index, 532 + 146 * index) for index in range(6)]
+BACK_SEVEN = [(481 + 139 * index, bottom)
+              for index, bottom in enumerate((459, 604, 749, 894, 1039, 1185, 1330))]
+CARDS_BY_BACKSTAGE = {}
+for count, corners in ((6, BACK_SIX), (7, BACK_SEVEN)):
+    back = {f"back_{index}": (top, 598, bottom, 731, bottom + 129, 731, top + 123, 598)
+            for index, (top, bottom) in enumerate(corners, 1)}
+    CARDS_BY_BACKSTAGE[count] = {**FRONT_CARDS, **back, **BENCH_CARDS}
+CARDS = CARDS_BY_BACKSTAGE[6]
 
 CARD_SIZE = (120, 130)
 PORTRAIT = (14, 38, 82, 92)
-EMPTY = {slot: (x - 17, y - 25, 34, 50) for slot, (x, y) in SLOTS.items()}
 
 HEADER = (220, 20, 320, 115)
 PHASE = (424, 28, 96, 32)
@@ -39,7 +46,7 @@ ACTION_BUTTON = (1700, 710, 210, 90)
 BENCH_WARNING = (775, 515, 400, 40)
 
 NUMBERS = {
-    "gold": (1635, 897, 58, 48),
+    "gold": (1618, 897, 73, 48),
     "level": (255, 881, 94, 53),
     "experience": (250, 935, 96, 33),
     "experience_cost": (302, 975, 38, 36),

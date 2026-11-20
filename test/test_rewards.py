@@ -23,13 +23,14 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(self.controller.method_calls, [call.post_touch_down(*REWARD_START)] +
                          [call.post_touch_move(*point) for point in TRACE] + [call.post_touch_up()])
         self.assertEqual(sleep.call_count, len(TRACE))
+        self.assertTrue(all(item == call(0.04) for item in sleep.call_args_list))
         self.capture.assert_called_once_with()
         self.assertEqual(result["result"], "uncertain")
         self.assertEqual(result["screenshot"], "after.png")
 
     def test_path_reaches_all_turns_with_short_steps(self):
         self.assertTrue(all(point in TRACE for point in REWARD_CORNERS))
-        self.assertTrue(all(hypot(x1 - x0, y1 - y0) <= 51
+        self.assertTrue(all(hypot(x1 - x0, y1 - y0) <= 26
                             for (x0, y0), (x1, y1) in zip(TRACE, TRACE[1:])))
 
     def test_down_failure_releases_and_stops(self):

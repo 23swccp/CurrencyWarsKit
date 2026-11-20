@@ -114,33 +114,14 @@ class StrategyOperation:
             sleep(INTERVAL)
             image = None
 
-    def observe(self, image=None, preparation=False):
+    def observe(self, image=None):
         def inspect(frame):
             if self.reader.page(frame):
                 self.observation = self.reader.read(frame)
                 if complete(self.observation):
                     return {**self.observation, "result": "success"}
-            elif preparation and frame is not image:
-                # 调用方给的那帧已判过不是备战页，只检查新截图。
-                supply = self.session.supply_reader()
-                if supply.page(frame):
-                    from screens.supply import SupplyOperation
-                    operation = SupplyOperation(self.session, supply)
-                    result = operation.execute(image=frame)
-                    self.image = operation.image
-                    return result
-                protagonist = self.session.protagonist_reader()
-                if protagonist.stage(frame) in {"entry", "selection"}:
-                    from screens.protagonist import ProtagonistOperation
-                    return ProtagonistOperation(self.session, protagonist).execute(image=frame)
-                following = self.reader.following(frame)
-                if following is not None:
-                    if following["shop"] == "closed":
-                        return {**following, **self.session.preparation.observe(frame)}
-                    return following
             return None
-        message = "备战或投资策略界面等待超时" if preparation else "投资策略选项读取超时"
-        return self.wait(inspect, message, image)
+        return self.wait(inspect, "投资策略选项读取超时", image)
 
     def refresh(self, option, before):
         count = before["options"][option - 1]["refreshes_left"]
@@ -192,7 +173,7 @@ class StrategyOperation:
 
     def execute(self, action="read", option=None, image=None):
         try:
-            result = self.observe(image, preparation=action == "preparation")
+            result = self.observe(image)
             if result["result"] == "success" and action in {"refresh", "choose"}:
                 result = self.refresh(option, result) if action == "refresh" else self.choose(option)
         except ERRORS as error:

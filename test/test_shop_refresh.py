@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from game.input import InputUncertain
-from screens.shop import FREE_COUNT, REFRESH_COST, REFRESH_LABEL, REFRESH, observe, read_refresh, refresh
+from screens.shop import FREE_COUNT, REFRESH_COST, REFRESH_LABEL, REFRESH, read_refresh, refresh
 from service import Session
 
 
@@ -55,6 +55,7 @@ class RefreshActionTests(unittest.TestCase):
         self.session.preparation_scene = Mock(return_value={"result": "success", "screen": "备战", "shop": "open"})
         self.session.save_image = Mock(side_effect=lambda image: {"screenshot": f"{image}.png"})
         self.read = patch("screens.shop.read_refresh").start()
+        self.names = patch("screens.shop.read_names", return_value={"shop_1": "大丽花"}).start()
         patch("screens.shop.sleep").start()
         self.addCleanup(patch.stopall)
 
@@ -134,6 +135,8 @@ class RefreshActionTests(unittest.TestCase):
         result = refresh(self.session)
         self.assertEqual(result["result"], "success")
         self.assertEqual(result["screenshot"], "later.png")
+        self.assertEqual(result["shop_slots"], {"shop_1": "大丽花"})
+        self.names.assert_called_once_with("later", self.session.preparation)
         self.session.controller.post_click.assert_called_once()
 
     def test_choice_after_click_returns_new_scene_and_stops(self):
@@ -162,12 +165,3 @@ class RefreshActionTests(unittest.TestCase):
         self.session.save_image.side_effect = OSError("磁盘错误")
         with self.assertRaisesRegex(InputUncertain, "OSError: 磁盘错误"):
             refresh(self.session)
-
-    def test_read_only_shop_returns_same_frame_without_clicking(self):
-        self.read.return_value = state("free", 1)
-        result = observe(self.session)
-        self.assertEqual(result["result"], "success")
-        self.assertEqual(result["free_refreshes"], 1)
-        self.assertEqual(result["screenshot"], "before.png")
-        self.read.assert_called_once_with("before", self.session.preparation)
-        self.session.controller.post_click.assert_not_called()

@@ -1,0 +1,58 @@
+{
+  "season": "4.7",
+  "factions": {
+    "幻月游戏": {
+      "variants": {
+        "愿力": [3, 5, 7, 9],
+        "经验": [3, 5, 7, 10],
+        "唱名": [3, 5, 7, 10]
+      }
+    },
+    "奇兽花园": {"tiers": [3, 5, 7, 10]},
+    "仙舟舰队": {"tiers": [2, 4, 6, 9]},
+    "开拓银轨": {"tiers": [2, 4, 6, 8, 10]},
+    "千星商会": {"three_star_member_tiers": [1, 2, 3, 4, 5, 6]},
+    "云上五骁": {"tiers": [2, 3, 4, 5]},
+    "星核猎手": {"tiers": [2, 3, 5, 7]},
+    "黄金大饭店": {"tiers": [2, 3, 4]},
+    "梦境交织": {"tiers": [2, 3, 4, 5]},
+    "星间旅人": {"tiers": [1, 2, 3, 4, 5, 6, 7, 8]},
+    "小小巨人": {"tiers": [2, 3, 4, 5, 6]},
+    "少女乐队": {"tiers": [1, 4], "exact_count": true}
+  },
+  "styles": {
+    "连击": {"tiers": [2, 4, 6, 8]},
+    "追击": {"tiers": [3, 5, 7, 10]},
+    "持续伤害": {"tiers": [3, 5, 7, 9]},
+    "群攻": {"tiers": [2, 4, 6, 8]},
+    "击破": {"tiers": [2, 4, 6, 8]},
+    "欢愉": {"tiers": [3, 5, 6, 8]},
+    "反击": {"tiers": [2, 4, 6]},
+    "召唤": {"tiers": [2, 4, 6, 8]},
+    "能量": {"tiers": [2, 4, 6]},
+    "治疗": {"tiers": [2, 4, 6]},
+    "守护": {"tiers": [2, 3]}
+  },
+  "emblems": {
+    "area_attack_emblem": "群攻",
+    "break_emblem": "击破",
+    "chimera_garden_emblem": "奇兽花园",
+    "combo_emblem": "连击",
+    "counterattack_emblem": "反击",
+    "damage_over_time_emblem": "持续伤害",
+    "elation_emblem": "欢愉",
+    "energy_emblem": "能量",
+    "follow_up_attack_emblem": "追击",
+    "healing_emblem": "治疗",
+    "interastral_merchant_guild_emblem": "千星商会",
+    "interstellar_traveler_emblem": "星间旅人",
+    "interwoven_dreams_emblem": "梦境交织",
+    "little_giant_emblem": "小小巨人",
+    "phantom_moon_game_emblem": "幻月游戏",
+    "shield_emblem": "守护",
+    "stellaron_hunter_emblem": "星核猎手",
+    "summon_emblem": "召唤",
+    "trailblazing_rail_emblem": "开拓银轨",
+    "xianzhou_fleet_emblem": "仙舟舰队"
+  }
+}
