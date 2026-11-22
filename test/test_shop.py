@@ -1,11 +1,16 @@
 """商店布局切换与界面分流。"""
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
+
+import numpy as np
+from PIL import Image
 
 from game.input import InputUncertain
 from game.slots import SHOP_TOGGLE
-from screens.shop import switch
+from screens.preparation import Preparation
+from screens.shop import read_cards, switch
 from service import ROUTES, Session
 
 
@@ -25,7 +30,9 @@ class ShopTests(unittest.TestCase):
         patch("screens.shop.sleep").start()
         patch("screens.shop.read_refresh", return_value={"refresh_mode": "paid", "refresh_cost": 2,
                                                         "free_refreshes": 0, "gold": 40}).start()
-        self.names = patch("screens.shop.read_names", return_value={"shop_1": "白露"}).start()
+        self.cards = patch("screens.shop.read_cards", return_value={
+            "shop_slots": {"shop_1": "白露"}, "shop_stars": {"shop_1": 1}, "shop_empty_slots": [], "shop_goods": {},
+        }).start()
         self.addCleanup(patch.stopall)
 
     def test_open_and_close_click_once_then_confirm_target_layout(self):
@@ -39,10 +46,13 @@ class ShopTests(unittest.TestCase):
                 self.assertEqual(result["screenshot"], "after.png")
                 self.session.controller.post_click.assert_called_once_with(*SHOP_TOGGLE)
                 if target == "open":
-                    self.names.assert_called_once_with("after", self.session.preparation)
+                    self.cards.assert_called_once_with("after", self.session.preparation)
                     self.assertEqual(result["shop_slots"], {"shop_1": "白露"})
+                    self.assertEqual(result["shop_stars"], {"shop_1": 1})
+                    self.assertEqual(result["shop_empty_slots"], [])
+                    self.assertEqual(result["shop_goods"], {})
                 else:
-                    self.names.assert_not_called()
+                    self.cards.assert_not_called()
 
     def test_already_in_target_layout_returns_without_input(self):
         self.session.preparation_scene.return_value = scene("open")
@@ -79,6 +89,45 @@ class ShopTests(unittest.TestCase):
         self.session.save_image.side_effect = OSError("磁盘错误")
         with self.assertRaisesRegex(InputUncertain, "OSError: 磁盘错误"):
             switch(self.session, "open")
+
+
+class ShopReadingTests(unittest.TestCase):
+    def test_post_purchase_frame_has_distinct_stars_and_empty_slot(self):
+        fixture = Path(__file__).with_name("fixtures") / "shop" / "after-purchase.webp"
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        with Image.open(fixture) as shop:
+            image[60:325, 365:1692] = np.asarray(shop.convert("RGB"))[:, :, ::-1]
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        cards = read_cards(image, reader)
+        self.assertEqual(cards["shop_slots"], {"shop_1": "景元", "shop_2": "景元", "shop_3": None,
+                                               "shop_4": "波提欧", "shop_5": "桂乃芬"})
+        self.assertEqual(cards["shop_stars"], {"shop_1": 1, "shop_2": 2, "shop_3": None,
+                                               "shop_4": 1, "shop_5": 1})
+        self.assertEqual(cards["shop_empty_slots"], ["shop_3"])
+        self.assertEqual(cards["shop_goods"], {})
+
+    def test_aha_equipment_card_is_read_in_another_slot_by_its_badge(self):
+        fixtures = Path(__file__).with_name("fixtures") / "shop"
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        with Image.open(fixtures / "after-purchase.webp") as shop:
+            image[60:325, 365:1692] = np.asarray(shop.convert("RGB"))[:, :, ::-1]
+        with Image.open(fixtures / "equipment.webp") as good:
+            image[66:325, 912:1142] = np.asarray(good.convert("RGB"))[:, :, ::-1]
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        cards = read_cards(image, reader)
+        self.assertEqual(cards["shop_slots"]["shop_3"], "以太钻头")
+        self.assertIsNone(cards["shop_stars"]["shop_3"])
+        self.assertEqual(cards["shop_empty_slots"], [])
+        self.assertEqual(cards["shop_goods"], {
+            "shop_3": {"kind": "equipment", "name": "以太钻头", "price": 4, "description": None,
+                       "equip_target": "aha"},
+        })
+        image[193:235, 1044:1087] = 0
+        without_badge = read_cards(image, reader)["shop_goods"]["shop_3"]
+        self.assertEqual(without_badge["kind"], "equipment")
+        self.assertNotIn("equip_target", without_badge)
 
 
 class SceneTests(unittest.TestCase):

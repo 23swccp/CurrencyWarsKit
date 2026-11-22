@@ -14,6 +14,7 @@
 | `observe`、`act supply`、`act supply-refresh` | [补给选择](supply.md) | 五列选项、可选刷新、单选计数验证与备战衔接 |
 | `observe`、`act armament-open`、`act armament-choose` | [武装箱](armament.md) | 识别箱卡、读取四选一与核对库存到账 |
 | `observe`、`act encounter`、`act encounter-refresh` | [遭遇节点](encounter.md) | 难度和奖励读取、整体刷新、选择确认与返回备战 |
+| `prepare`、`act tea-break-choose`、`act tea-break-commission` | [幕后茶歇](tea-break.md) | 事件分支、委托确认、金币结算和下一节点 |
 | 选择主角 | [主角与光环](protagonist.md) | 1-9、2-9 的角色拖选、两侧光环、付费刷新与完成依据 |
 | 双龙吟选择（设计） | [双龙吟](double-dragons.md) | 丹恒•饮月上阵后的单选、确认和加入结果核对 |
 | 共舞选择（设计） | [梦境交织](dreamweave.md) | 自动选中两张卡、通过左侧羁绊行核对结果 |

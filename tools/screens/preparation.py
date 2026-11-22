@@ -14,7 +14,7 @@ from maa.tasker import Tasker
 
 from ocr import ImageController, MODEL
 from recognition_debug import focus
-from screens import armament, card_stars
+from screens import armament, card_stars, tea_break
 from screens.emblems import Emblems
 from screens.inventory import Inventory
 from game.actions import BUTTON_ACTIONS
@@ -160,6 +160,12 @@ class Preparation(Recognition):
                      "bench_warning", *CARDS, *SEVEN_EMPTY_TEMPLATES.values()):
             with Image.open(ASSETS / "preparation" / f"{name}.png") as image:
                 self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
+        for name in ("empty", "equipment", "aha"):
+            with Image.open(ASSETS / "shop" / f"{name}.png") as image:
+                self.resource.override_image(f"shop_{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
+        for name in (*tea_break.ROIS, "confirm"):
+            with Image.open(ASSETS / "tea_break" / f"{name}.png") as image:
+                self.resource.override_image(f"tea_{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
         for name in ("title", "entry", "details"):
             with Image.open(ASSETS / "trail_shop" / f"{name}.png") as image:
                 self.resource.override_image(f"trail_{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())

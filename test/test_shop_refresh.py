@@ -55,7 +55,12 @@ class RefreshActionTests(unittest.TestCase):
         self.session.preparation_scene = Mock(return_value={"result": "success", "screen": "备战", "shop": "open"})
         self.session.save_image = Mock(side_effect=lambda image: {"screenshot": f"{image}.png"})
         self.read = patch("screens.shop.read_refresh").start()
-        self.names = patch("screens.shop.read_names", return_value={"shop_1": "大丽花"}).start()
+        self.cards = patch("screens.shop.read_cards", return_value={
+            "shop_slots": {"shop_1": "大丽花", "shop_2": "肖像速写"},
+            "shop_stars": {"shop_1": 2, "shop_2": None}, "shop_empty_slots": [],
+            "shop_goods": {"shop_2": {"kind": "effect", "name": "肖像速写", "price": 3,
+                                     "description": "获得1个【员工投影仪】。"}},
+        }).start()
         patch("screens.shop.sleep").start()
         self.addCleanup(patch.stopall)
 
@@ -135,8 +140,11 @@ class RefreshActionTests(unittest.TestCase):
         result = refresh(self.session)
         self.assertEqual(result["result"], "success")
         self.assertEqual(result["screenshot"], "later.png")
-        self.assertEqual(result["shop_slots"], {"shop_1": "大丽花"})
-        self.names.assert_called_once_with("later", self.session.preparation)
+        self.assertEqual(result["shop_slots"], {"shop_1": "大丽花", "shop_2": "肖像速写"})
+        self.assertEqual(result["shop_stars"], {"shop_1": 2, "shop_2": None})
+        self.assertEqual(result["shop_empty_slots"], [])
+        self.assertEqual(result["shop_goods"]["shop_2"]["kind"], "effect")
+        self.cards.assert_called_once_with("later", self.session.preparation)
         self.session.controller.post_click.assert_called_once()
 
     def test_choice_after_click_returns_new_scene_and_stops(self):

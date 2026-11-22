@@ -4,4 +4,5 @@
 BUTTON_ACTIONS = {
     "出战": "start-battle",
     "选择主角": "protagonist-open",
+    "幕后茶歇": "prepare",
 }

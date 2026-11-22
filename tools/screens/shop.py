@@ -1,10 +1,16 @@
-"""商店角色名、开关与单次刷新。"""
+"""商店卡片识别、开关与单次刷新。"""
 
 import re
 from time import monotonic, sleep
 
+import numpy as np
+from PIL import Image
+
 from game.input import ERRORS, InputUncertain, uncertain
 from game.slots import NUMBERS, SHOP_TOGGLE
+from game.traits import roster
+from recognition_debug import focus
+from screens.card_stars import row_count
 
 
 TIMEOUT = 8
@@ -13,7 +19,10 @@ REFRESH = (1618, 524)
 REFRESH_LABEL = (1555, 470, 135, 40)
 FREE_COUNT = (1595, 512, 55, 51)
 REFRESH_COST = (1628, 512, 42, 51)
-NAME_AREAS = tuple((x, 288, 170, 34) for x in (376, 645, 913, 1181, 1450))
+CARD_CENTERS = (490, 759, 1027, 1295, 1564)
+EMPTY_SCORE = 0.9
+EQUIPMENT_SCORE = 0.9
+NAME_CORRECTIONS = {"刻律德": "刻律德菈"}
 
 
 def read_refresh(image, reader):
@@ -32,15 +41,63 @@ def complete(result):
             for key in ("refresh_cost", "free_refreshes", "gold"))
 
 
-def read_names(image, reader):
+def read_stars(image, slot, center):
+    left, top, width, height = center - 60, 65, 120, 40
+    focus(image, (left, top, width, height), f"{slot} 星级", "crop")
+    band = Image.fromarray(image[top:top+height, left:left+width])
+    band = band.resize((width // 2, height // 2), Image.Resampling.LANCZOS)
+    blue, green, red = np.asarray(band, dtype=np.int16).transpose(2, 0, 1)
+    # 收紧亮核阈值，分开相邻金星的光晕。
+    gold = (red > 244) & (green > 215) & (green - blue > 17)
+    return row_count(gold, minimum=2)
+
+
+def card_name(text):
+    name = re.sub(r"\s+", "", text)
+    return NAME_CORRECTIONS.get(name, name)
+
+
+def read_product(image, reader, slot, center, name, lines):
+    # 正文从卡面左侧起排，角色的羁绊文字从图标右侧起排。
+    description = "".join(line["text"].strip() for line in lines
+                          if line["box"][0] < center - 84 and 115 <= line["box"][1] < 286)
+    price = reader.integer(image, f"{slot} 商品价格", (center + 84, 287, 31, 35))
+    result = {"name": name or None, "price": price, "description": description or None}
+    if reader.score(image, "shop_equipment.png", (center - 63, 112, 42, 42)) >= EQUIPMENT_SCORE:
+        result["kind"] = "equipment"
+        if reader.score(image, "shop_aha.png", (center + 17, 193, 43, 42)) >= EQUIPMENT_SCORE:
+            result["equip_target"] = "aha"
+    else:
+        result["kind"] = "effect" if description else "unknown"
+    return result
+
+
+def read_cards(image, reader):
     reader.load_ocr()
+    characters, _, _ = roster()
     names = {}
-    for index, area in enumerate(NAME_AREAS, 1):
+    stars = {}
+    empty_slots = []
+    goods = {}
+    for index, center in enumerate(CARD_CENTERS, 1):
         slot = f"shop_{index}"
-        text = reader.text(image, f"{slot} 角色名", area)
-        # 防：已售空的卡位或 OCR 漏读没有名字，保留槽位并返回 null。
-        names[slot] = re.sub(r"\s+", "", text) or None
-    return names
+        if reader.score(image, "shop_empty.png", (center - 40, 96, 80, 200)) >= EMPTY_SCORE:
+            names[slot] = stars[slot] = None
+            empty_slots.append(slot)
+            continue
+        name = card_name(reader.text(image, f"{slot} 卡底名称", (center - 114, 288, 170, 34)))
+        if name.replace("·", "•") not in characters:
+            lines = reader.text_boxes(image, f"{slot} 商品整卡", (center - 115, 66, 230, 259))
+            footer = next((card_name(line["text"]) for line in lines
+                           if line["box"][0] < center + 55 and line["box"][1] >= 288), "")
+            if footer.replace("·", "•") in characters:
+                name = footer
+            else:
+                name = name or footer
+                goods[slot] = read_product(image, reader, slot, center, name, lines)
+        names[slot] = name or None
+        stars[slot] = None if slot in goods else read_stars(image, slot, center) or 1
+    return {"shop_slots": names, "shop_stars": stars, "shop_empty_slots": empty_slots, "shop_goods": goods}
 
 
 def save(session, image, result, action, clicked):
@@ -50,6 +107,8 @@ def save(session, image, result, action, clicked):
         if clicked:
             raise InputUncertain(f"商店输入后保存截图出错：{type(error).__name__}: {error}") from error
         raise
+
+
 def switch(session, target):
     image = session.preparation_frame()
     scene = session.preparation_scene(image)
@@ -77,7 +136,8 @@ def switch(session, target):
                 result.update(needs_ai=True, message="商店切换结果待确认")
             elif target == "open":
                 reader = session.preparation_reader()
-                result.update(read_refresh(image, reader), shop_slots=read_names(image, reader))
+                result.update(read_refresh(image, reader))
+                result.update(read_cards(image, reader))
                 if not complete(result):
                     result.update(result="uncertain", needs_ai=True, message="商店已展开，刷新信息待确认")
     except ERRORS as error:
@@ -129,8 +189,8 @@ def refresh(session):
                         consumed = (after["free_refreshes"] == before["free_refreshes"]-1 if free
                                     else after["gold"] < before["gold"])
                         if consumed:
-                            result.update(result="success", needs_ai=False, message="已确认刷新",
-                                          shop_slots=read_names(image, reader))
+                            result.update(read_cards(image, reader), result="success",
+                                          needs_ai=False, message="已确认刷新")
                             break
                     # 防：金币变化与本次费用不符。
                     if after["gold"] != before["gold"] and after["gold"] != expected_gold:

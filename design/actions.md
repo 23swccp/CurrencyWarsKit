@@ -9,6 +9,9 @@ flowchart TD
     Text -->|选择主角| Hero["next_action 为 protagonist-open"]
     Hero -->|prepare| Open["复用入口观察，点击一次，再确认选择页"]
     Hero -->|observe| Read["只读返回入口"]
+    Text -->|幕后茶歇| Tea["next_action 为 prepare"]
+    Tea -->|prepare| Event["打开幕后茶歇并返回两个分支"]
+    Tea -->|observe| Read
     Text -->|其他非空文字| Buff["保留原文，next_action 为空，接受明确出战指令"]
     Text -->|空白| Unknown["next_action 为空，等待重新观察"]
     Frame -->|OCR 任务出错| Error["按输入前后边界报告，结果不入缓存"]

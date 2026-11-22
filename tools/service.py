@@ -506,6 +506,33 @@ def trail_shop(action):
     return handle
 
 
+def tea_break(action):
+    def handle(session, data):
+        from screens.tea_break import TeaBreak
+
+        name = f"tea-break-{action}"
+
+        def run():
+            operation = TeaBreak(session, session.preparation_frame())
+            result = operation.execute(action, data["option"])
+            if result["stage"] == "complete":
+                preparation = session.enter_preparation(operation.image)
+                result = {**preparation, "tea_break": result["tea_break"]}
+            else:
+                try:
+                    result = {**session.save_image(operation.image), **result}
+                except game_input.ERRORS as error:
+                    if not operation.clicked:
+                        raise
+                    raise game_input.InputUncertain(
+                        f"茶歇输入后保存截图出错：{type(error).__name__}: {error}") from error
+            return {**result, "action": name, "option": data["option"]}
+
+        return session.run(name, run)
+
+    return handle
+
+
 def buy_experience(session, data):
     from screens.experience import buy
 
@@ -544,6 +571,8 @@ ROUTES = {
     "/shop-open": lambda session, data: session.run("shop-open", lambda: session.shop("open")),
     "/shop-close": lambda session, data: session.run("shop-close", lambda: session.shop("closed")),
     **{f"/trail-shop-{action}": trail_shop(action) for action in ("open", "buy", "close")},
+    "/tea-break-choose": tea_break("choose"),
+    "/tea-break-commission": tea_break("commission"),
     "/refresh": lambda session, data: session.run("refresh", session.refresh_shop),
     "/navigate": navigate,
     "/environment": environment,
@@ -624,7 +653,7 @@ def request(command, info=None, data=None):
     timeout = 60 if (
         command in {"navigate", "observe", "strategy-refresh",
                     "strategy-choose", "prepare", "continue-battle"}
-        or command.startswith(("protagonist", "supply", "encounter"))
+        or command.startswith(("protagonist", "supply", "encounter", "tea-break"))
     ) else 30
     # 防：批量经验购买逐次等待确认，超过默认单条命令通信时限。
     if command == "buy-experience":

@@ -132,7 +132,8 @@ class HttpTests(unittest.TestCase):
                    "protagonist-character", "protagonist-aura", "protagonist-refresh",
                    "protagonist-confirm", "sell", "shop-open", "shop-close", "refresh", "supply-refresh", "supply-choose",
                    "encounter-refresh", "encounter-choose", "armament-open", "armament-choose", "buy-experience",
-                   "trail-shop-open", "trail-shop-buy", "trail-shop-close"}
+                   "trail-shop-open", "trail-shop-buy", "trail-shop-close",
+                   "tea-break-choose", "tea-break-commission"}
         self.assertEqual({path[1:] for path in service.ROUTES} | {"stop"}, commands | actions)
 
     def test_busy_requests_do_not_capture(self):

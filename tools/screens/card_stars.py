@@ -1,4 +1,4 @@
-"""从备战角色卡底部读取星级。"""
+"""按星标亮核读取角色卡星级。"""
 
 from math import ceil, floor
 
@@ -49,23 +49,25 @@ def _cores(mask):
     return sorted(centers)
 
 
+def row_count(mask, *, minimum=1):
+    centers = _cores(mask)
+    if not minimum <= len(centers) <= 4:
+        return None
+    xx, yy = zip(*centers)
+    # 防：立绘高光和金边可能通过颜色筛选，星标应居中成行且间距在限定范围内。
+    if abs((xx[0] + xx[-1]) / 2 - mask.shape[1] / 2) > 10 or max(yy) - min(yy) > 5:
+        return None
+    if all(10 <= b - a <= 24 for a, b in zip(xx, xx[1:])):
+        return len(centers)
+    return None
+
+
 def read(image, card, quad, slot):
     focus(image, _band_box(quad), f"{slot} 星级", "crop")
     # 备战截图使用 BGR，卡片裁正保留原通道顺序。
     blue, green, red = np.asarray(card.crop(STAR_BAND), dtype=np.int16).transpose(2, 0, 1)
     gold = (red > 232) & (green > 183) & (green - blue > 17)
     cyan = (blue > 228) & (green > 202) & (blue - red > 35)
-    middle = blue.shape[1] / 2
-    counts = []
-    for mask in (gold, cyan):
-        centers = _cores(mask)
-        if not 1 <= len(centers) <= 4:
-            continue
-        xx, yy = zip(*centers)
-        # 防：立绘高光和金边可能通过颜色筛选，星标应居中成行且间距在限定范围内。
-        if abs((xx[0] + xx[-1]) / 2 - middle) > 10 or max(yy) - min(yy) > 5:
-            continue
-        if all(10 <= b - a <= 24 for a, b in zip(xx, xx[1:])):
-            counts.append(len(centers))
+    counts = [count for mask in (gold, cyan) if (count := row_count(mask)) is not None]
     # 防：异色高光形成第二组候选时，无法唯一确定该卡的星级。
     return counts[0] if len(counts) == 1 else None

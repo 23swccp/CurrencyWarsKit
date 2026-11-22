@@ -46,10 +46,10 @@ class Battle(Recognition):
         if not button["button_text"]:
             return {**page, **button, "result": "failed",
                     "message": "右侧行动按钮文字待确认"}
-        # 防：已知「选择主角」入口会打开选择页，不能作为出战执行。
-        if button["next_action"] == "protagonist-open":
+        # 防：「选择主角」或「幕后茶歇」入口会打开对应界面。
+        if button["next_action"] not in (None, "start-battle"):
             return {**page, **button, "result": "failed", "needs_ai": True,
-                    "message": "当前入口为选择主角，请先完成主角选择"}
+                    "message": f"当前入口为{button['button_text']}，请先处理该流程"}
         return {**page, **button}
 
     def recognize(self, image):

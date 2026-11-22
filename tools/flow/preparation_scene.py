@@ -1,6 +1,7 @@
 """按同一优先级识别备战布局和选择界面。"""
 
-from screens import armament, trail_shop
+from game.actions import BUTTON_ACTIONS
+from screens import armament, tea_break, trail_shop
 from screens.encounter import complete as encounter_complete
 from screens.preparation import layout
 from screens.protagonist import observation as protagonist_observation
@@ -23,7 +24,14 @@ def identify(session, image):
         return {"result": "success", "screen": "遭遇", "needs_ai": True}
     if session.strategy_reader().page(image):
         return {"result": "success", "screen": "投资策略", "needs_ai": True}
-    return layout(image, preparation)
+    if current := tea_break.stage(preparation, image):
+        return {"result": "uncertain" if current == "transition" else "success",
+                "screen": tea_break.SCREEN, "stage": current}
+    scene = layout(image, preparation)
+    if scene and scene["shop"] == "closed" and tea_break.matched(preparation, image, "entry"):
+        return {**scene, "screen": tea_break.SCREEN, "stage": "entry",
+                "button_text": tea_break.SCREEN, "next_action": BUTTON_ACTIONS[tea_break.SCREEN]}
+    return scene
 
 
 def read_choice(session, image, scene):
@@ -32,6 +40,10 @@ def read_choice(session, image, scene):
             return armament.read(session.preparation_reader(), image, scene["title"])
         case trail_shop.SCREEN:
             return trail_shop.read(session.preparation_reader(), image)
+        case tea_break.SCREEN:
+            if scene["stage"] in {"entry", "transition"}:
+                return scene
+            return tea_break.read(session.preparation_reader(), image, scene["stage"])
         case "选择主角":
             return protagonist_observation(session.protagonist_reader(), image, scene["stage"])
         case "补给":

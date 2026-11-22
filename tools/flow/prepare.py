@@ -7,6 +7,7 @@ from flow.rewards import sweep
 from game.input import ERRORS, InputUncertain, uncertain
 from game.slots import BLANK, SHOP_TOGGLE
 from screens.protagonist import ProtagonistOperation
+from screens.tea_break import SCREEN as TEA_BREAK, TeaBreak
 
 
 ATTEMPTS = 3
@@ -86,6 +87,18 @@ class PreparationFlow:
             self.clicked = self.clicked or operation.clicked
         return result
 
+    def advance_tea_break(self, result):
+        if result["screen"] != TEA_BREAK or result["stage"] not in {"entry", "dialogue", "reward", "settlement"}:
+            return result, {}
+        operation = TeaBreak(self.session, self.image)
+        result = operation.execute("advance", current=result["stage"])
+        self.image = operation.image
+        self.clicked = self.clicked or operation.clicked
+        if result["stage"] != "complete":
+            return result, {}
+        self.collected = False
+        return self.confirm(self.image), {"tea_break": result["tea_break"]}
+
     def enter(self, image=None, delay=0):
         self.collected = False
         return self.resume(image, delay)
@@ -94,11 +107,13 @@ class PreparationFlow:
         self.image = image
         self.clicked = False
         self.blank_clicks = 0
+        tea_break = {}
         try:
             if delay:
                 self.wait(delay)
                 image = None
-            result = self.close_shop(self.open_protagonist(self.confirm(image)))
+            result, tea_break = self.advance_tea_break(self.confirm(image))
+            result = self.close_shop(self.open_protagonist(result))
             if result["result"] == "success" and result["screen"] == "备战" and not self.collected:
                 self.clicked = True
                 sweep(self.session.controller)
@@ -111,7 +126,7 @@ class PreparationFlow:
                 raise
             result = uncertain(error, "备战入场出错，附最近观察截图")
         try:
-            return {**self.session.save_image(self.image), **result, "action": "prepare"}
+            return {**self.session.save_image(self.image), **result, **tea_break, "action": "prepare"}
         except ERRORS as error:
             if self.clicked:
                 raise InputUncertain(f"备战输入后保存截图出错：{type(error).__name__}: {error}") from error

@@ -62,6 +62,10 @@ def main():
     actions.add_parser("encounter-refresh", help="刷新所有遭遇选项一次")
     encounter = actions.add_parser("encounter", help="选择一项遭遇并确认")
     encounter.add_argument("--option", type=int, choices=(1, 2), required=True, help="从左到右的选项编号")
+    tea_break = actions.add_parser("tea-break-choose", help="选择当前茶歇的一张事件卡")
+    tea_break.add_argument("--option", type=int, choices=(1, 2), required=True, help="从左到右的选项编号")
+    commission = actions.add_parser("tea-break-commission", help="选择并确认茶歇委托")
+    commission.add_argument("--option", type=int, choices=(1, 2), required=True, help="从上到下的选项编号")
     box = actions.add_parser("armament-open", help="打开指定备战席武装箱")
     box.add_argument("--slot", required=True, choices=[f"bench_{i}" for i in range(1, 10)])
     reward = actions.add_parser("armament-choose", help="领取指定武装箱装备并核对到账")
@@ -143,7 +147,8 @@ def main():
                               "press": ("key",), "move": ("source", "target"), "environment": ("option",),
                               "strategy": ("option",), "strategy-refresh": ("option",), "collect": (),
                               "supply": ("option",), "supply-refresh": (), "encounter": ("option",),
-                              "encounter-refresh": (),
+                              "encounter-refresh": (), "tea-break-choose": ("option",),
+                              "tea-break-commission": ("option",),
                               "start-battle": (), "continue-battle": (), "protagonist-open": (),
                               "protagonist-confirm": (), "protagonist-character": ("slot",),
                               "protagonist-aura": ("option",), "protagonist-refresh": ("option",),
