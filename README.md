@@ -1,4 +1,9 @@
+<img src="asset/logo.png" alt="CurrencyWarsKit Logo" width="200">
+
 # CurrencyWarsKit
+
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4)
+![Python: 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 
 > **正在开发中**：功能、命令和数据格式可能调整。部分流程已通过实机或保存帧验证，完整对局与不同游戏状态的适配仍在进行中。
 
