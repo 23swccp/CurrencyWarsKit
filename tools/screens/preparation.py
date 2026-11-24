@@ -20,7 +20,7 @@ from screens.inventory import Inventory
 from game.actions import BUTTON_ACTIONS
 from game.slots import (
     ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, CARDS_BY_BACKSTAGE, CARD_SIZE, FRONT,
-    HEADER, ICONS, NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN, SLOTS_BY_BACKSTAGE,
+    HEADER, HEALTH, ICONS, NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN, SLOTS_BY_BACKSTAGE,
 )
 from game.traits import catalog, projection
 
@@ -65,7 +65,7 @@ def parse_header(texts):
         title = next((item for item in texts if re.sub(r"\s+", "", item["text"]) == "备战阶段"
                       and inside(item["box"], title_region)), None)
         if title is not None:
-            # 防：节点漏读、格式或位置不符时返回 null，不沿用上一帧节点。
+            # 防：节点漏读、格式或位置不符，返回 null。
             node = next((re.sub(r"\s+", "", item["text"]) for item in texts
                          if inside(item["box"], node_region)
                          and re.fullmatch(r"\d+-\d+", re.sub(r"\s+", "", item["text"]))), None)
@@ -156,7 +156,8 @@ class Preparation(Recognition):
         self.header_result = None
         self.inventory = Inventory()
         self.emblems = Emblems(self.resource, self.tasker, catalog()["emblems"])
-        for name in ("shop", "icons", "shop_open", "sell", "armament", "armament_advanced", "armament_open",
+        for name in ("shop", "icons", "shop_open", "sell", "armament", "armament_advanced", "armament_aha", "armament_open",
+                     "special_privilege_icon", "special_luck_icon", "special_privilege_title", "special_luck_title",
                      "bench_warning", *CARDS, *SEVEN_EMPTY_TEMPLATES.values()):
             with Image.open(ASSETS / "preparation" / f"{name}.png") as image:
                 self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
@@ -208,16 +209,20 @@ class Preparation(Recognition):
 
     def observe(self, image):
         started = perf_counter()
-        result = {**self.numbers(image), **self.slots(image)}
+        result = {**self.numbers(image), "health": self.health(image), **self.slots(image)}
         slots = result["slots"]
         capacity = self.capacity_warning(image)
         if not capacity and all(slots[slot] is not None for slot in BENCH):
             capacity = {"reason": "bench_full", "needs_ai": True}
-        return {**result, **capacity, "inventory": self.inventory.read(image),
+        return {**result, **capacity, "inventory": self.inventory.read(image), "special_items": self.special_items(image),
                 "trait_projection": projection(slots, self.emblems.read(image, slots),
                                                partial=result["backstage_count"] is None),
                 **self.action_button(image), "node": self.header(image)["node"],
                 "recognition_ms": round((perf_counter() - started) * 1000, 1)}
+
+    def special_items(self, image):
+        from screens.special_items import read_items
+        return read_items(self, image)
 
     def capacity_warning(self, image):
         # 防：游戏提示处理容量，交给 AI 售卖角色。
@@ -259,6 +264,9 @@ class Preparation(Recognition):
         self.load_ocr()
         return parse_numbers({name: self.text(image, name, roi) for name, roi in NUMBERS.items()})
 
+    def health(self, image):
+        return self.integer(image, "小队生命值", HEALTH)
+
     def load_ocr(self):
         if not self.ocr_ready:
             # 防：OCR 模型加载失败。
@@ -276,7 +284,7 @@ class Preparation(Recognition):
         if image is not self.button_image:
             self.load_ocr()
             text = re.sub(r"\s+", "", self.text(image, "右侧行动按钮", ACTION_BUTTON))
-            # 防：buff 改变按钮文字，未收录的名称保留原文，不当成禁止操作。
+            # 防：buff 改变按钮文字，未收录的名称保留原文。
             result = {"button_text": text, "next_action": BUTTON_ACTIONS.get(text)}
             self.button_image, self.button_result = image, result
         return self.button_result
@@ -288,7 +296,7 @@ class Preparation(Recognition):
             threshold = 0.9
             if backstage == 7:
                 name = SEVEN_EMPTY_TEMPLATES.get(slot)
-                # 防：七格左三格还没有空槽样本，邻格模板不能确认空位。
+                # 防：七格左三格尚无空槽样本。
                 if name is None:
                     return None
         x, y = SLOTS_BY_BACKSTAGE[backstage][slot]

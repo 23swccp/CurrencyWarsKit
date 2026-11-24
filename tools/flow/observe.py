@@ -31,7 +31,8 @@ def inspect(session, image):
     if scene["shop"] == "closed":
         return {**scene, **preparation.observe(image)}
 
-    result = {**scene, **read_refresh(image, preparation), **read_cards(image, preparation)}
+    # 防：展开的商店遮住备战顶部生命值。
+    result = {**scene, "health": None, **read_refresh(image, preparation), **read_cards(image, preparation)}
     # 防：商店已展开，但 OCR 未读全刷新信息。
     if not shop_complete(result):
         result.update(result="uncertain", needs_ai=True, message="商店刷新信息待确认")

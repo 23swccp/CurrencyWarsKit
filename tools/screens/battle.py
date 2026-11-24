@@ -1,5 +1,6 @@
 """战斗入场确认与旗帜监测。"""
 
+import re
 from threading import Event, Lock, Thread
 from time import monotonic, sleep
 
@@ -22,6 +23,18 @@ TIMEOUT = 10
 INTERVAL = 2
 MISSING = 5
 MIN_SCORE = 0.9
+RESULT_TITLE = (810, 190, 300, 75)
+RESULT_HEALTH = (640, 480, 195, 50)
+
+
+def settlement_details(image, preparation):
+    preparation.load_ocr()
+    title = re.sub(r"\s+", "", preparation.text(image, "战斗结果", RESULT_TITLE))
+    health_text = re.sub(r"\s+", "", preparation.text(image, "结算生命值", RESULT_HEALTH))
+    health = re.fullmatch(r"小队生命值(\d+)", health_text)
+    # 防：已确认普通及最终战胜利标题，其他标题不推断胜负。
+    return {"outcome": "victory" if title == "挑战成功" else "unknown",
+            "health": int(health[1]) if health else None}
 
 
 class Battle(Recognition):
@@ -32,6 +45,8 @@ class Battle(Recognition):
         super().__init__(self.controller)
         self.state_lock = Lock()
         self.state = {"result": "uncertain", "screen": "未知", "needs_ai": True}
+        self.active_battle = None
+        self.latest_battle = None
         self.check_after = None
         for name in ("intro", "flag", "continue"):
             with Image.open(ASSETS / "battle" / f"{name}.png") as image:
@@ -50,7 +65,72 @@ class Battle(Recognition):
         if button["next_action"] not in (None, "start-battle"):
             return {**page, **button, "result": "failed", "needs_ai": True,
                     "message": f"当前入口为{button['button_text']}，请先处理该流程"}
-        return {**page, **button}
+        return {**page, **button, "health": preparation.health(image)}
+
+    def start_receipt(self, node, health):
+        with self.state_lock:
+            self.active_battle = {"node": node, "outcome": "unknown", "health_before": health,
+                                  "health_after": None, "health_after_source": None, "health_change": None,
+                                  "settlement_screenshot": None, "next_screen": None}
+            if self.latest_battle is not None:
+                self.latest_battle["awaiting_health"] = False
+
+    def settlement_receipt(self, screenshot, outcome, health, *, final=False):
+        with self.state_lock:
+            battle = self.active_battle
+            # 防：服务重启后从本场结算手动接管，没有出战前记录。
+            if battle is None:
+                battle = {"node": None, "outcome": "unknown", "health_before": None,
+                          "health_after": None, "health_after_source": None, "health_change": None,
+                          "settlement_screenshot": None, "next_screen": None}
+            # 防：继续挑战点击结果不确定，手动接管同一结算页。
+            if battle["settlement_screenshot"] is not None:
+                screenshot = battle["settlement_screenshot"]
+                outcome = battle["outcome"] if outcome == "unknown" else outcome
+                health = battle["health_after"] if health is None else health
+            self.latest_battle = {**battle, "outcome": outcome, "health_after": health,
+                                  "health_after_source": "settlement" if health is not None else None,
+                                  "settlement_screenshot": screenshot, "awaiting_health": health is None and not final}
+            if health is not None and battle["health_before"] is not None:
+                self.latest_battle["health_change"] = health - battle["health_before"]
+            self.active_battle = self.latest_battle.copy()
+
+    def end_battle(self):
+        with self.state_lock:
+            self.active_battle = None
+
+    def update_receipt(self, result):
+        with self.state_lock:
+            battle = self.latest_battle
+            if battle is None:
+                return
+            if battle["next_screen"] is None:
+                battle["next_screen"] = result["screen"]
+            if not battle["awaiting_health"]:
+                return
+            # 防：战后先进入选择页，等下一张备战帧，不沿用上一场生命值。
+            if result["screen"] == "备战" and result.get("node") is not None and result.get("health") is not None:
+                battle["health_after"] = result["health"]
+                battle["health_after_source"] = "preparation"
+                if battle["health_before"] is not None:
+                    battle["health_change"] = result["health"] - battle["health_before"]
+                battle["awaiting_health"] = False
+
+    def final_health(self, health):
+        with self.state_lock:
+            battle = self.latest_battle
+            # 防：整局结算页面的生命值可能漏读。
+            if health is None:
+                return
+            battle["health_after"] = health
+            battle["health_after_source"] = "final_summary"
+            if battle["health_before"] is not None:
+                battle["health_change"] = health - battle["health_before"]
+            battle["awaiting_health"] = False
+
+    def receipt(self):
+        with self.state_lock:
+            return None if self.latest_battle is None else self.latest_battle.copy()
 
     def recognize(self, image):
         check_size(image)
@@ -125,6 +205,8 @@ def start(session, reader):
     result = reader.ready(image, session.preparation_reader())
     if result["result"] != "success":
         return {**session.save_image(image), **result, "action": "start-battle"}
+    reader.update_receipt(result)
+    reader.start_receipt(result["node"], result["health"])
     try:
         if not session.controller.post_click(*START).wait().succeeded:
             raise InputUncertain("出战点击结果待核对")
@@ -152,10 +234,13 @@ def start(session, reader):
 
 def finish(session, reader, image):
     before = session.save_image(image)
+    details = settlement_details(image, session.preparation_reader())
+    reader.settlement_receipt(before["screenshot"], details["outcome"], details["health"])
     try:
         reader.begin({"result": "success", "screen": "等待备战"})
         if not session.controller.post_click(*CONTINUE_BUTTON).wait().succeeded:
             raise InputUncertain("继续挑战点击结果待核对")
+        reader.end_battle()
         result = session.enter_preparation(delay=PREPARATION_DELAY)
     except ERRORS as error:
         result = {**before, **uncertain(error, "继续挑战后出错，附点击前结算截图")}

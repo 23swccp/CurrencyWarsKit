@@ -103,6 +103,7 @@ class Session:
         self.supply = None
         self.encounter = None
         self.armament = None
+        self.special_item = None
         self.protagonist = None
         self.battle = None
         self.battle_monitor = None
@@ -144,6 +145,7 @@ class Session:
                 "connected": self.controller is not None, "method": self.method,
                 "operation": self.operation, "error": self.error,
                 "overlay": self.overlay is not None,
+                "battle_result_available": self.battle is not None and self.battle.receipt() is not None,
             }
             if self.battle is not None:
                 result["screen"] = self.battle.current()["screen"]
@@ -171,6 +173,8 @@ class Session:
             try:
                 with trace(None if name == "overlay" else self.overlay):
                     data = action()
+                if self.battle is not None and "screen" in data:
+                    self.battle.update_receipt(data)
             except game_input.ERRORS as error:
                 with self.metadata_lock:
                     self.error = str(error)
@@ -242,6 +246,14 @@ class Session:
             self.queue_collection(result)
         return result
 
+    def special_action(self, action, *args):
+        from screens import special_items
+        return getattr(special_items, action)(self, *args)
+
+    def buy_character(self, slot):
+        from screens.buy import buy
+        return buy(self, slot)
+
     def sell_character(self, source):
         from screens.sell import sell
         result = sell(self, source)
@@ -270,7 +282,7 @@ class Session:
                 return {**self.save_image(image), **page, "result": "failed", "needs_ai": True,
                         "message": "后台拖动要求商店收起的备战画面"}
             count = backstage_size(image)
-            # 防：两套后台布局未分清时，不能用旧坐标拖动。
+            # 防：两套后台布局未分清，槽位坐标待确认。
             if count is None:
                 return {**self.save_image(image), "result": "uncertain", "screen": "备战", "needs_ai": True,
                         "message": "后台槽位布局待确认"}
@@ -420,6 +432,15 @@ class Session:
             self.preparation_flow = PreparationFlow(self)
         result = self.preparation_flow.enter(image, delay)
         if self.battle is not None:
+            self.battle.update_receipt(result)
+            self.battle.begin(result)
+        return result
+
+    def settle(self):
+        from flow.settlement import settle
+
+        result = settle(self)
+        if self.battle is not None and result["result"] == "success":
             self.battle.begin(result)
         return result
 
@@ -552,6 +573,8 @@ def protagonist(action):
 # 接口路径与处理函数的唯一清单，返回路径即表示接口存在。
 ROUTES = {
     "/status": lambda session, data: session.status(),
+    "/battle-result": lambda session, data: {"result": "success", "battle":
+        session.battle.receipt() if session.battle is not None else None},
     "/rewards": lambda session, data: session.observe_rewards(),
     "/overlay": lambda session, data: session.run("overlay", lambda: session.set_overlay(data["enabled"])),
     "/screenshot": lambda session, data: session.run("screenshot", session.capture),
@@ -568,6 +591,9 @@ ROUTES = {
     "/sell": lambda session, data: session.run("sell", lambda: session.sell_character(data["from"])),
     "/armament-open": lambda s, d: s.run("armament-open", lambda: s.armament_action("open", d["slot"])),
     "/armament-choose": lambda s, d: s.run("armament-choose", lambda: s.armament_action("choose", d["option"])),
+    "/special-use": lambda s, d: s.run("special-use", lambda: s.special_action("use", d["item"], d["target"])),
+    "/special-choose": lambda s, d: s.run("special-choose", lambda: s.special_action("choose", d["option"])),
+    "/buy": lambda s, d: s.run("buy", lambda: s.buy_character(d["slot"])),
     "/shop-open": lambda session, data: session.run("shop-open", lambda: session.shop("open")),
     "/shop-close": lambda session, data: session.run("shop-close", lambda: session.shop("closed")),
     **{f"/trail-shop-{action}": trail_shop(action) for action in ("open", "buy", "close")},
@@ -591,6 +617,7 @@ ROUTES = {
     "/start-battle": lambda session, data: session.run("start-battle", session.start_battle),
     "/prepare": lambda session, data: session.run("prepare", session.enter_preparation),
     "/continue-battle": lambda session, data: session.run("continue-battle", session.continue_battle),
+    "/settle": lambda session, data: session.run("settle", session.settle),
 }
 
 
@@ -652,7 +679,7 @@ def request(command, info=None, data=None):
     )
     timeout = 60 if (
         command in {"navigate", "observe", "strategy-refresh",
-                    "strategy-choose", "prepare", "continue-battle"}
+                    "strategy-choose", "prepare", "continue-battle", "settle"}
         or command.startswith(("protagonist", "supply", "encounter", "tea-break"))
     ) else 30
     # 防：批量经验购买逐次等待确认，超过默认单条命令通信时限。

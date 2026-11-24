@@ -42,7 +42,7 @@ def projection(slots, worn_emblems, *, partial=False):
     for slot, card in slots.items():
         if not slot.startswith(("front_", "back_")) or card is None:
             continue
-        # 防：头像漏读时保留该槽，不猜角色归属。
+        # 防：头像漏读，保留该槽供核对。
         if "unknown" in card:
             unresolved_slots.append(slot)
             continue
@@ -70,7 +70,7 @@ def projection(slots, worn_emblems, *, partial=False):
         tier = next_tier = None
         rule = rules.get(trait, {})
         exact = rule.get("exact_count", False)
-        # 防：后台整排缺失时，前台成员只提供人数下限，无法确认档位或补位。
+        # 防：后台整排缺失，前台成员只提供人数下限。
         if not partial:
             if "variants" in rule:
                 # 防：本局幻月游戏变体未读取，只有各变体一致时才给出档位。

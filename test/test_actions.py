@@ -71,7 +71,8 @@ class ActionButtonTests(unittest.TestCase):
             self.assertIsNone(protagonist.stage(self.image))
             self.assertEqual(battle.ready(self.image, self.reader)["next_action"], "start-battle")
             self.assertEqual(protagonist.following(self.image)["next_action"], "start-battle")
-        self.reader.text.assert_called_once()
+        action_reads = [call for call in self.reader.text.call_args_list if call.args[1] == "右侧行动按钮"]
+        self.assertEqual(len(action_reads), 1)
 
 
 class ActionDispatchTests(unittest.TestCase):

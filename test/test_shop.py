@@ -92,6 +92,15 @@ class ShopTests(unittest.TestCase):
 
 
 class ShopReadingTests(unittest.TestCase):
+    def test_fifth_slot_purchase_frames_distinguish_card_and_empty(self):
+        fixtures = Path(__file__).with_name("fixtures") / "shop"
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        for name, expected in (("fifth-before.webp", []), ("fifth-after.webp", ["shop_5"])):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                self.assertEqual(read_cards(image, reader)["shop_empty_slots"], expected)
+
     def test_post_purchase_frame_has_distinct_stars_and_empty_slot(self):
         fixture = Path(__file__).with_name("fixtures") / "shop" / "after-purchase.webp"
         image = np.zeros((1080, 1920, 3), dtype=np.uint8)
@@ -150,7 +159,7 @@ class SceneTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.setUp()
                 if kind == "armament":
-                    self.session.preparation.score.return_value = 1
+                    self.session.preparation.score.side_effect = lambda image, name, roi: 1 if name == "armament.png" else 0
                 elif kind == "protagonist":
                     self.session.protagonist.selection_page.return_value = True
                 else:

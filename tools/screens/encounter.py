@@ -55,7 +55,7 @@ class Encounter(Recognition):
     def refreshes(self, image):
         text = self.text(image, "遭遇刷新次数", (700, 875, 160, 50))
         match = re.fullmatch(r"剩余次数[:：](\d+)", text)
-        # 防：刷新次数漏读，不将未知当成零或可刷新。
+        # 防：刷新次数漏读。
         return int(match[1]) if match else None
 
     def read(self, image):
@@ -87,7 +87,7 @@ class EncounterOperation:
 
     def capture(self):
         job = self.session.controller.post_screencap().wait()
-        # 防：截图失败时不再发送输入。
+        # 防：截图失败。
         if not job.succeeded:
             raise RuntimeError("遭遇截图失败")
         return job.get()
@@ -116,7 +116,7 @@ class EncounterOperation:
 
     def refresh(self, before):
         count = before["refreshes_left"]
-        # 防：剩余次数漏读或为零，不能确认可以刷新。
+        # 防：剩余次数漏读或为零。
         if count is None:
             return {**before, "result": "uncertain", "message": "遭遇刷新次数待确认"}
         if count == 0:
@@ -201,7 +201,7 @@ class EncounterOperation:
         try:
             return {**self.session.save_image(self.image), **result}
         except ERRORS as error:
-            # 防：输入后保存现场失败，不能报告确定失败。
+            # 防：输入后保存现场失败，游戏结果待核对。
             if self.clicked:
                 raise InputUncertain(f"遭遇操作后保存截图出错：{type(error).__name__}: {error}") from error
             raise

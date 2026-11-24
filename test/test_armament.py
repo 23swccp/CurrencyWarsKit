@@ -40,6 +40,16 @@ class Controller(ImageController):
 
 
 class ArmamentTests(TestCase):
+    def test_aha_panel_observed_from_real_frame(self):
+        session = self.session("advanced")
+        session.controller.image = frame("aha", "panel")
+        result = ROUTES["/observe"](session, {})
+        self.assertEqual(result["screen"], "武装箱选择", result)
+        self.assertEqual(result["title"], "阿哈·简易武装箱")
+        self.assertEqual(result["source"], "bench_1")
+        self.assertEqual([item["name"] for item in result["options"]],
+                         ["生命之花", "光能电池", "和平手枪", "折叠小刀"])
+
     def session(self, kind):
         session = Session(1, "framepool")
         session.controller = Controller(kind)

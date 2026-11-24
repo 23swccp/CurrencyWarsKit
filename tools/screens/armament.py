@@ -15,7 +15,8 @@ from recognition_debug import focus
 from screens.inventory import BOTH_COLUMNS
 
 
-TITLES = {"简易武装箱": "armament.png", "进阶武装箱": "armament_advanced.png"}
+TITLES = {"简易武装箱": "armament.png", "进阶武装箱": "armament_advanced.png",
+          "阿哈·简易武装箱": "armament_aha.png"}
 TITLE = (940, 35, 175, 50)
 OPEN = "armament_open.png"
 TITLE_SCORE = 0.84
@@ -129,7 +130,7 @@ class Armament:
                 return {**session.save_image(image), "result": "failed", "message": "当前未确认武装箱面板"}
             before = read(reader, image, title)
             slot = before["source"]
-            # 防：面板动画中选项或唯一白框未读全，无法核对来源和所选装备。
+            # 防：面板动画中选项或来源白框未读全。
             if before["result"] != "success" or slot is None:
                 return {**session.save_image(image), **before, "result": "uncertain", "message": "选项或箱子来源待确认"}
             x = CENTERS[value-1]

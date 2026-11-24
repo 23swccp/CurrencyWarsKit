@@ -19,7 +19,10 @@ def frames(image, x0):
     gray = (np.ptp(area, axis=2) < 45) & (brightness > 100) & (brightness < 220)
     blue, green, red = area.transpose(2, 0, 1)
     gold = (red > 155) & (green > 140) & (red > blue + 28) & (green > blue)
-    border = gray | gold
+    # 实机样例中特权装备边框为蓝色，阿哈装备边框为红色。
+    privilege = (blue > 190) & (red < 90) & (blue - red > 80)
+    aha = (red > 190) & (red - green > 100) & (blue > 60)
+    border = gray | gold | privilege | aha
     rows = np.pad(border.cumsum(axis=1), ((0, 0), (1, 0)))
     columns = np.pad(border.cumsum(axis=0), ((1, 0), (0, 0)))
     candidates = []

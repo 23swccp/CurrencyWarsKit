@@ -131,7 +131,7 @@ class Protagonist(Recognition):
             options.append(option)
         banner = "".join(self.lines(image, (840, 115, 330, 40)))
         count = re.search(r"剩(\d+)次", banner)
-        money = "".join(self.lines(image, (1335, 933, 65, 43)))
+        money = "".join(self.lines(image, (1345, 933, 55, 43)))
         return {"screen": "选择主角", "stage": "selection", "needs_ai": True,
                 "characters": self.characters(image), "character": self.character(image),
                 "options": options, "confirm_enabled": self.enabled(image),

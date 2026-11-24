@@ -2,29 +2,26 @@
 
 from time import monotonic, sleep
 
-import numpy as np
-from PIL import Image
 from maa.resource import Resource
 from maa.tasker import Tasker
 
 from game.input import ERRORS
 from game.slots import NUMBERS
+from ocr import MODEL
 from recognition_debug import focus
-from screens.preparation import ASSETS
 
 
 COST = 4
 XP = 4
 LABEL = (230, 835, 136, 48)
-TEMPLATE = "buy_experience.png"
 TASK = "BuyExperience"
 TIMEOUT = 3
 INTERVAL = 0.3
 
 PIPELINE = {
     TASK: {
-        "recognition": {"type": "TemplateMatch", "param": {
-            "template": [TEMPLATE], "roi": list(LABEL), "threshold": [0.87], "method": 5}},
+        "recognition": {"type": "OCR", "param": {
+            "expected": ["购买经验"], "roi": list(LABEL)}},
         "action": {"type": "Click", "param": {"target": [297, 860, 1, 1]}},
         "post_delay": 300,
         "timeout": 1000,
@@ -34,8 +31,8 @@ PIPELINE = {
 
 def purchase_tasker(controller):
     resource = Resource()
-    with Image.open(ASSETS / "preparation" / TEMPLATE) as source:
-        resource.override_image(TEMPLATE, np.asarray(source.convert("RGB"))[:, :, ::-1].copy())
+    if not resource.use_cpu() or not resource.post_ocr_model(MODEL).wait().succeeded:
+        raise RuntimeError(f"购买经验 OCR 模型加载失败：{MODEL}")
     tasker = Tasker()
     if not tasker.bind(resource, controller) or not tasker.inited:
         raise RuntimeError("购买经验 Pipeline 初始化失败")
@@ -97,7 +94,7 @@ def buy(session, xp):
     tasker = None
     while confirmed < count:
         exp = numbers["experience"]
-        # 防：购前 OCR 漏读，无法确认预算或计算经验增量。
+        # 防：购前金币、等级、经验或费用漏读。
         if None in (numbers["gold"], numbers["level"], exp["current"], exp["required"],
                     numbers["experience_cost"]):
             return finish("uncertain", "购买前的金币、等级、经验或费用待确认")

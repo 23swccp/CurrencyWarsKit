@@ -1,12 +1,15 @@
 """主角选择、单侧刷新与备战恢复测试。"""
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import numpy as np
+from PIL import Image
 
 from game.input import InputUncertain
 from screens.protagonist import CHARACTERS, CONFIRM, TARGET, Protagonist, ProtagonistOperation
+from screens.preparation import Preparation
 from service import Session
 
 
@@ -77,6 +80,15 @@ class ProtagonistReaderTests(unittest.TestCase):
         self.assertEqual(result["options"][0]["enemy_difficulty_change"], 3)
         self.assertEqual(result["options"][0]["tags"], "速度")
         self.assertTrue(all(c.args[0] is self.image for c in self.reader.lines.call_args_list))
+
+    def test_live_frame_reads_gold_twenty_one(self):
+        path = Path(__file__).parent / "fixtures" / "protagonist" / "gold-twenty-one.webp"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        preparation = Preparation()
+        self.addCleanup(preparation.close)
+        reader = Protagonist(preparation)
+        self.assertEqual(reader.read(image)["gold"], 21)
 
     def test_confirmation_uses_visible_button_brightness(self):
         self.assertFalse(self.reader.enabled(self.image))

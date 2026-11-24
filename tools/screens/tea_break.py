@@ -246,7 +246,7 @@ class TeaBreak:
 
     def claim(self):
         before = read(self.reader, self.image, "reward")
-        # 防：金币漏读，无法核对本次领取的到账额。
+        # 防：金币漏读，领取金额待核对。
         if before["gold"] is None:
             return {**before, "result": "uncertain", "needs_ai": True, "message": "领奖前金币待确认"}
         self.click("TeaClaim", ("reward", "claim"), (960, 982), arrivals=(("settlement",),))
@@ -334,7 +334,7 @@ class TeaBreak:
                     "stage": self.current, "needs_ai": True, "message": "茶歇操作要求对应的选择界面"}
         before = read(self.reader, self.image, self.current)
         index = option - 1
-        # 防：目标选项文字漏读时，无法核对将要执行的选择。
+        # 防：目标选项文字漏读。
         selected_option = before["options"][index]
         if "unknown" in selected_option:
             return {**before, "message": "茶歇选项待确认"}

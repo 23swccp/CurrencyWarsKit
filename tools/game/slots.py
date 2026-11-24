@@ -46,12 +46,14 @@ ACTION_BUTTON = (1700, 710, 210, 90)
 BENCH_WARNING = (775, 515, 400, 40)
 
 NUMBERS = {
-    "gold": (1618, 897, 73, 48),
-    "level": (255, 881, 94, 53),
+    "gold": (1625, 897, 66, 48),
+    "level": (255, 893, 80, 43),
     "experience": (250, 935, 96, 33),
     "experience_cost": (302, 975, 38, 36),
-    "deployment": (891, 231, 165, 64),
+    "deployment": (890, 225, 150, 75),
 }
+
+HEALTH = (1430, 60, 50, 35)
 
 REWARD_START = (12, 12)
 REWARD_CORNERS = (

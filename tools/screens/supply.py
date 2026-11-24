@@ -50,7 +50,7 @@ class Supply(Recognition):
     def selection(self, image):
         text = self.text(image, "补给选择计数", SELECTION)
         match = re.fullmatch(r"已选择(\d+)/(\d+)", text)
-        # 防：选择计数漏读，不把未知当成未选择。
+        # 防：选择计数漏读。
         return {"current": int(match[1]) if match else None, "limit": int(match[2]) if match else None}
 
     def refresh(self, image):
@@ -90,14 +90,14 @@ class SupplyOperation:
 
     def capture(self):
         job = self.session.controller.post_screencap().wait()
-        # 防：截图任务失败，保留此前现场，不继续发送输入。
+        # 防：截图任务失败，保留此前现场。
         if not job.succeeded:
             raise RuntimeError("补给截图失败")
         return job.get()
 
     def click(self, point):
         self.clicked = True
-        # 防：点击任务失败，游戏是否收到输入无法确定。
+        # 防：点击任务失败，游戏输入结果待核对。
         if not self.session.controller.post_click(*point).wait().succeeded:
             raise InputUncertain(f"补给点击结果待核对：{point}")
 
@@ -125,11 +125,11 @@ class SupplyOperation:
         return self.wait(inspect, "补给选项或选择计数读取超时", image)
 
     def refresh(self, before):
-        # 防：部分补给没有刷新控件，不向缺席的按钮位置发送输入。
+        # 防：部分补给没有刷新控件。
         if not before["can_refresh"]:
             return {**before, "result": "failed", "message": "当前补给不支持刷新"}
         count = before["refreshes_left"]
-        # 防：有按钮但次数漏读，不把未知次数当作可用次数。
+        # 防：刷新按钮存在但次数漏读。
         if count is None:
             return {**before, "result": "uncertain", "message": "补给刷新次数待确认"}
         # 防：界面显示没有剩余刷新次数。
@@ -174,7 +174,7 @@ class SupplyOperation:
                 self.observation = scene
                 if scene["screen"] == "备战":
                     return scene
-                # 防：确认后出现其他选择，保留现场交给 AI，不代选下一项。
+                # 防：确认后出现其他选择，保留现场交给 AI。
                 if scene["screen"] != "未知":
                     return {**scene, "result": "uncertain", "needs_ai": True,
                             "message": "补给确认后出现其他界面，请核对领取结果"}
@@ -200,7 +200,7 @@ class SupplyOperation:
         try:
             return {**self.session.save_image(self.image), **result}
         except ERRORS as error:
-            # 防：输入后写截图失败，不能把已经执行的动作报告成确定失败。
+            # 防：输入后写截图失败，游戏结果待核对。
             if self.clicked:
                 raise InputUncertain(f"补给操作后保存截图出错：{type(error).__name__}: {error}") from error
             raise

@@ -64,7 +64,7 @@ def read(reader, image):
     if details >= 3:
         return catalog(reader, image, power)
 
-    # 免费启动前只有中央启动项，不能把它当成四列货架。
+    # 免费启动前只有中央启动项。
     name = reader.text(image, "开拓商店启动项", (937, 352, 156, 57)).strip()
     launch = ("星穹列车" in name and reader.integer(image, "启动项价格", (1121, 360, 35, 42)) == 0)
     result = {"screen": SCREEN, "mode": "launch" if launch else "unknown",
@@ -177,7 +177,7 @@ class TrailShop:
 
     def buy(self, slot):
         before = self.current()
-        # 防：付费货架未展开、余额漏读或目标格无法确认。
+        # 防：付费货架未展开、余额漏读或目标格未识别。
         if before["screen"] != SCREEN or before["mode"] != "paid":
             return {**before, "result": "failed", "needs_ai": True, "message": "购买要求已打开的开拓商店付费货架"}
         old = before["offers"][slot-1]

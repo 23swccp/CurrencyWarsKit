@@ -1,14 +1,17 @@
 """出战识别、等待时限与输入结果测试。"""
 
 import unittest
+from pathlib import Path
 from threading import Lock
 from unittest.mock import Mock, call, patch
 
 import numpy as np
+from PIL import Image
 
-from screens.battle import Battle, CONTINUE_BUTTON, Monitor, START, continue_battle, finish, start
+from screens.battle import Battle, CONTINUE_BUTTON, Monitor, START, continue_battle, finish, start, settlement_details
+from screens.preparation import Preparation
 from game.input import InputUncertain
-from service import Session
+from service import ROUTES, Session
 
 
 class BattleReaderTests(unittest.TestCase):
@@ -19,6 +22,19 @@ class BattleReaderTests(unittest.TestCase):
 
     def scores(self, **values):
         self.reader.score = Mock(side_effect=lambda image, name, roi: values.get(name[:-4], 0.2))
+
+    def test_saved_victory_screen_reads_result_and_health(self):
+        path = Path(__file__).parent / "fixtures" / "battle" / "victory.png"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        preparation = Preparation()
+        self.addCleanup(preparation.close)
+        self.assertEqual(settlement_details(image, preparation), {"outcome": "victory", "health": 75})
+
+    def test_unrecognized_settlement_does_not_invent_outcome_or_health(self):
+        preparation = Mock()
+        preparation.text.side_effect = ["其他标题", ""]
+        self.assertEqual(settlement_details(self.image, preparation), {"outcome": "unknown", "health": None})
 
     def test_flag_or_intro_confirms_entry(self):
         for marker in ("flag", "intro"):
@@ -64,6 +80,7 @@ class BattleReaderTests(unittest.TestCase):
 
     def test_buff_button_names_do_not_need_templates_or_a_name_list(self):
         self.reader.score = Mock()
+        self.preparation.health.return_value = 80
         for text in ("出战", "任意增益修改的文字", "Go!"):
             self.preparation.action_button.return_value = {
                 "button_text": text, "next_action": "start-battle" if text == "出战" else None}
@@ -72,6 +89,8 @@ class BattleReaderTests(unittest.TestCase):
                 result = self.reader.ready(self.image, self.preparation)
             self.assertEqual(result["result"], "success")
             self.assertEqual(result["button_text"], text)
+            self.assertEqual(result["health"], 80)
+        self.assertTrue(all(call.args[0] is self.image for call in self.preparation.health.call_args_list))
         self.reader.score.assert_not_called()
 
     def test_known_main_character_entry_is_not_clicked_as_battle(self):
@@ -99,7 +118,7 @@ class BattleOperationTests(unittest.TestCase):
         self.job.get.side_effect = self.frame
         self.session.controller.post_click.return_value.wait.return_value.succeeded = True
         self.reader = Mock()
-        self.reader.ready.return_value = {"result": "success", "screen": "备战"}
+        self.reader.ready.return_value = {"result": "success", "screen": "备战", "node": "1-1", "health": 80}
         self.reader.recognize.return_value = {"result": "uncertain", "screen": "未知"}
         self.clock_patch = patch("screens.battle.monotonic", side_effect=lambda: self.now)
         self.sleep_patch = patch("screens.battle.sleep", side_effect=self.advance)
@@ -125,6 +144,10 @@ class BattleOperationTests(unittest.TestCase):
         self.session.controller.post_click.assert_called_once_with(*START)
         self.session.save_image.assert_called_once_with("frame-2")
         self.reader.ready.assert_called_once_with("frame-1", self.session.preparation_reader.return_value)
+        self.reader.update_receipt.assert_called_once_with(self.reader.ready.return_value)
+        self.reader.start_receipt.assert_called_once_with("1-1", 80)
+        self.assertLess(self.reader.method_calls.index(call.update_receipt(self.reader.ready.return_value)),
+                        self.reader.method_calls.index(call.start_receipt("1-1", 80)))
 
     def test_timeout_stops_at_ten_seconds_with_five_checks(self):
         result = start(self.session, self.reader)
@@ -175,6 +198,7 @@ class BattleOperationTests(unittest.TestCase):
         self.assertEqual(self.captures, [0])
         self.sleep.assert_not_called()
         self.session.controller.post_click.assert_called_once()
+        self.reader.start_receipt.assert_called_once_with("1-1", 80)
 
     def test_capture_failure_before_click_is_reported(self):
         self.job.succeeded = False
@@ -229,6 +253,7 @@ class BattleFinishTests(unittest.TestCase):
         self.result = {"result": "success", "screen": "备战", "screenshot": "prepared.png", "slots": {}}
         self.session.enter_preparation.return_value = self.result
         self.sleep = patch("screens.battle.sleep").start()
+        patch("screens.battle.settlement_details", return_value={"outcome": "victory", "health": 75}).start()
         self.addCleanup(patch.stopall)
 
     def test_continue_clicks_once_waits_eight_seconds_then_hands_off(self):
@@ -272,6 +297,8 @@ class BattleStateTests(unittest.TestCase):
         self.reader.state_lock = Lock()
         self.reader.state = {"result": "uncertain", "screen": "未知"}
         self.reader.check_after = None
+        self.reader.active_battle = None
+        self.reader.latest_battle = None
         self.image = np.zeros((1080, 1920, 3), dtype="uint8")
         self.reader.score = Mock(return_value=0.2)
         timer = patch("screens.battle.monotonic", side_effect=lambda: self.now)
@@ -333,6 +360,119 @@ class BattleStateTests(unittest.TestCase):
         self.assertEqual(result["result"], "uncertain")
         self.assertEqual(result["screen"], "未知")
         self.assertIn("RuntimeError: 识别详情缺失", result["message"])
+
+    def test_receipt_waits_for_next_preparation_and_records_net_health_change(self):
+        self.reader.start_receipt("1-1", 80)
+        self.reader.settlement_receipt("settlement.png", "unknown", None)
+        self.reader.update_receipt({"screen": "遭遇"})
+        receipt = self.reader.receipt()
+        self.assertEqual((receipt["node"], receipt["outcome"], receipt["health_before"]), ("1-1", "unknown", 80))
+        self.assertEqual(receipt["settlement_screenshot"], "settlement.png")
+        self.assertTrue(receipt["awaiting_health"])
+        self.reader.update_receipt({"screen": "备战", "node": "1-2", "health": 84})
+        receipt = self.reader.receipt()
+        self.assertEqual((receipt["health_after"], receipt["health_change"]), (84, 4))
+        self.assertEqual(receipt["health_after_source"], "preparation")
+        self.assertFalse(receipt["awaiting_health"])
+
+    def test_missing_health_is_not_assigned_to_previous_battle(self):
+        self.reader.start_receipt("1-1", 80)
+        self.reader.settlement_receipt("settlement.png", "unknown", None)
+        self.reader.update_receipt({"screen": "备战", "node": "1-2", "health": None})
+        self.assertIsNone(self.reader.receipt()["health_after"])
+        self.reader.start_receipt("1-2", 75)
+        self.reader.update_receipt({"screen": "备战", "node": "1-3", "health": 70})
+        self.assertIsNone(self.reader.receipt()["health_after"])
+        self.reader.settlement_receipt("second.png", "unknown", None)
+        self.reader.update_receipt({"screen": "备战", "node": "1-3", "health": 70})
+        self.assertEqual(self.reader.receipt()["health_change"], -5)
+        self.assertEqual(self.reader.receipt()["node"], "1-2")
+        self.assertEqual(self.reader.receipt()["settlement_screenshot"], "second.png")
+
+    def test_same_node_preparation_after_settlement_supplies_health(self):
+        self.reader.start_receipt("1-1", 80)
+        self.reader.settlement_receipt("settlement.png", "unknown", None)
+        self.reader.update_receipt({"screen": "备战", "node": "1-1", "health": 74})
+        self.assertEqual(self.reader.receipt()["health_change"], -6)
+
+    def test_missing_final_health_cannot_be_filled_by_next_game(self):
+        self.reader.start_receipt("3-7", 80)
+        self.reader.settlement_receipt("settlement.png", "victory", None, final=True)
+        self.reader.final_health(None)
+        self.reader.update_receipt({"screen": "备战", "node": "1-1", "health": 100})
+        self.assertIsNone(self.reader.receipt()["health_after"])
+        self.assertFalse(self.reader.receipt()["awaiting_health"])
+
+    def test_manual_settlement_without_start_retains_unknown_before(self):
+        self.reader.settlement_receipt("settlement.png", "unknown", None)
+        self.reader.update_receipt({"screen": "备战", "node": "1-3", "health": 70})
+        self.assertIsNone(self.reader.receipt()["health_before"])
+        self.assertIsNone(self.reader.receipt()["health_change"])
+        self.assertEqual(self.reader.receipt()["health_after"], 70)
+
+    def test_settlement_health_is_not_replaced_by_later_preparation(self):
+        self.reader.start_receipt("1-7", 80)
+        self.reader.settlement_receipt("settlement.png", "victory", 75)
+        self.reader.update_receipt({"screen": "备战", "node": "1-8", "health": 85})
+        receipt = self.reader.receipt()
+        self.assertEqual((receipt["outcome"], receipt["health_after"], receipt["health_change"]),
+                         ("victory", 75, -5))
+        self.assertEqual(receipt["health_after_source"], "settlement")
+        self.assertEqual(receipt["next_screen"], "备战")
+
+
+class BattleReceiptIntegrationTests(unittest.TestCase):
+    def test_rechecking_settlement_after_uncertain_click_preserves_before(self):
+        session = Session(1, "framepool")
+        reader = Battle.__new__(Battle)
+        reader.state_lock = Lock()
+        reader.state = {"screen": "战斗"}
+        reader.check_after = None
+        reader.active_battle = None
+        reader.latest_battle = None
+        session.battle = reader
+        session.controller = Mock()
+        session.controller.post_click.return_value.wait.return_value.succeeded = False
+        session.save_image = Mock(side_effect=[{"screenshot": "first.png"}, {"screenshot": "second.png"}])
+        reader.start_receipt("1-7", 90)
+        with patch("screens.battle.settlement_details", side_effect=[
+                {"outcome": "victory", "health": 75}, {"outcome": "unknown", "health": None}]):
+            finish(session, reader, "first")
+            finish(session, reader, "second")
+        receipt = reader.receipt()
+        self.assertEqual((receipt["node"], receipt["health_before"], receipt["health_after"]), ("1-7", 90, 75))
+        self.assertEqual((receipt["outcome"], receipt["health_change"], receipt["settlement_screenshot"]),
+                         ("victory", -15, "first.png"))
+
+    def test_background_finish_then_observe_updates_receipt(self):
+        session = Session(1, "framepool")
+        reader = Battle.__new__(Battle)
+        reader.state_lock = Lock()
+        reader.state = {"screen": "战斗"}
+        reader.check_after = None
+        reader.active_battle = None
+        reader.latest_battle = None
+        session.battle = reader
+        session.controller = Mock()
+        session.controller.post_click.return_value.wait.return_value.succeeded = True
+        session.save_image = Mock(return_value={"screenshot": "settlement.png"})
+        session.preparation_flow = Mock()
+        session.preparation_flow.enter.return_value = {"screen": "遭遇", "result": "success"}
+        reader.start_receipt("1-7", 90)
+        with patch("screens.battle.settlement_details", return_value={"outcome": "unknown", "health": None}):
+            finish(session, reader, "settlement-frame")
+        self.assertTrue(ROUTES["/battle-result"](session, {})["battle"]["awaiting_health"])
+        session.run("observe", lambda: {"screen": "备战", "result": "success", "node": "1-8", "health": 92})
+        receipt = ROUTES["/battle-result"](session, {})["battle"]
+        self.assertEqual((receipt["node"], receipt["health_before"], receipt["health_after"]), ("1-7", 90, 92))
+        self.assertEqual(receipt["health_change"], 2)
+        self.assertEqual(receipt["settlement_screenshot"], "settlement.png")
+        self.assertTrue(session.status()["battle_result_available"])
+
+    def test_fresh_session_has_no_result(self):
+        session = Session(1, "framepool")
+        self.assertIsNone(ROUTES["/battle-result"](session, {})["battle"])
+        self.assertFalse(session.status()["battle_result_available"])
 
 
 class MonitorTests(unittest.TestCase):

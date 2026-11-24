@@ -69,5 +69,5 @@ def read(image, card, quad, slot):
     gold = (red > 232) & (green > 183) & (green - blue > 17)
     cyan = (blue > 228) & (green > 202) & (blue - red > 35)
     counts = [count for mask in (gold, cyan) if (count := row_count(mask)) is not None]
-    # 防：异色高光形成第二组候选时，无法唯一确定该卡的星级。
+    # 防：异色高光形成第二组星级候选。
     return counts[0] if len(counts) == 1 else None

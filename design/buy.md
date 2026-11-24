@@ -1,10 +1,10 @@
 # 购买角色
 
-调用方指定当前商店的一个槽位。服务按最近一次观察检查条件，最多点击一次，再用购前与购后的画面证据判定结果。`buy` 尚未实现。
+调用方指定当前商店的一个槽位。服务在本次操作重新截图检查条件，最多点击一次，再用购前与购后的画面证据判定结果。
 
 ## 命令时序
 
-`cw see`、`cw buy shop_1` 是拟议命令；当前 CLI 用 `screenshot` 取截图，`buy` 接口待实现。
+通过 `observe` 查看当前商店，再用 `act buy --slot shop_3` 购买。购买入口重新读取目标，返回截图和证据。
 
 ```mermaid
 sequenceDiagram
@@ -13,17 +13,17 @@ sequenceDiagram
     participant S as Python 常驻服务
     participant M as MaaFramework
 
-    AI->>CLI: cw see（拟议）
+    AI->>CLI: cw observe
     CLI->>S: 本机 HTTP · 请求观察
     S->>M: 截取游戏窗口并识别
     M-->>S: 截图与识别结果
-    S->>S: 保存最近一次观察
+    S->>S: 读取同帧商店内容
     S-->>CLI: 观察数据
     CLI-->>AI: 输出观察 JSON
 
-    AI->>CLI: cw buy shop_1（拟议）
+    AI->>CLI: cw act buy --slot shop_1
     CLI->>S: 本机 HTTP · 购买请求（目标槽位 shop_1）
-    S->>S: 从最近观察读取目标与购前数据
+    S->>S: 重新截图读取目标与购前数据
     alt 购买条件已确认
         S->>M: 执行一次购买点击并观察购后画面
         M-->>S: 可用的购后截图与识别结果
@@ -38,7 +38,7 @@ sequenceDiagram
 | 数据 | 流向 | 形态 |
 |---|---|---|
 | 购买意图 | AI → CLI → 服务 | 调用方给出目标槽位，经本机 HTTP 传给服务 |
-| 游戏画面 | 窗口 → MaaFramework → 服务 | 截图存 `.runtime/screenshots/`，结构化观察拟在会话中保留 |
+| 游戏画面 | 窗口 → MaaFramework → 服务 | 截图存 `.runtime/screenshots/`，本次动作读取同帧状态 |
 | 动作结果 | 服务 → CLI → AI | JSON，判定规则见下文 |
 
 会话保留窗口连接、最近截图尺寸和操作锁，购买请求复用这份互斥边界。
@@ -103,7 +103,7 @@ flowchart TD
     Success -->|出现额外选择| AI["返回 needs_ai，等待 AI 指定"]
 ```
 
-刷新和腾位售卖由 AI 另行指定。满席时能否通过自动升星购买待实机确认。购前相关状态漏读时保留未知字段，使用本次画面证据。
+刷新和腾位售卖由 AI 另行指定。满席时能否通过自动升星购买待实机确认，当前要求备战席至少有一个已确认的空位。售价或金币未读出时返回 `uncertain`；未识别角色、已售空或非角色商品返回 `failed`。免费购买待样例确认。
 
 ### 点击后判定
 
@@ -119,14 +119,15 @@ flowchart TD
 | 金币变化与预期不符，或识别结果互相矛盾 | `uncertain`，返回实际观察 |
 | 出现未知弹窗、离开预期界面或等待到期 | `uncertain`，停止后续操作，保留现场 |
 | 游戏明确拒绝且能确认未成交 | `failed`，返回原因与最新观察，不自动重试 |
+| 购前卡面在点击时已与截图不一致，Pipeline 未发出点击 | `failed`，说明未发送输入，不进入购后等待 |
 
 金币与商店格都没变化时同样返回 `uncertain`：画面可能未更新或识别失败。免费购买、折扣、返还金币等特殊效果是否存在、如何验证，需目标版本实机确认。
 
-购买触发自动升星或额外选择时槽位可能变化，重新识别相关区域，出现玩法决策就停止交给 AI。购买已确认但后续选择待处理时结果可为 `success` 且 `needs_ai: true`。
+购买后若出现额外界面，当前停止并返回现场 `uncertain`；该情况下的成交与后续选择待核对。当前成功结果重读商店，不读取展开布局下的前后台角色。
 
 ### 返回示例
 
-数字仅说明格式。`evidence` 记录本次判定依据，不替代最新 `slots` 观察。
+数字仅说明格式。`evidence` 记录本次判定依据；成功时返回商店状态。
 
 ```json
 {
@@ -134,16 +135,17 @@ flowchart TD
   "screen": "备战",
   "needs_ai": false,
   "action": "buy",
-  "from": "shop_1",
+  "slot": "shop_1",
   "message": "已确认购买藿藿。",
-  "evidence": {"name": "藿藿", "price": 3, "gold_before": 24, "gold_after": 21, "shop_slot": "已售出"},
+  "evidence": {"name": "藿藿", "price": 3, "gold_before": 24, "gold_after": 21, "shop_slot_empty": true},
   "gold": 21,
-  "slots": {"shop_1": null, "bench_1": {"unknown": true}}
+  "shop_slots": {"shop_1": null},
+  "shop_empty_slots": ["shop_1"]
 }
 ```
 
-`shop_1: null` 表示已确认该格为空；若游戏显示的是售出标记而非空格，按实际形态表达。`bench_1` 未识别时保持未知。无法确认成交时字段相同，`result` 为 `uncertain`、`needs_ai` 为 `true`，`message` 说明已点击与未能确认的内容；AI 先查看新观察或截图，必要时执行 `resync`。
+`shop_empty_slots` 表示已确认售空的格子。无法确认成交时返回 `uncertain`、`needs_ai: true`、证据与截图；AI 先查看现场，必要时执行 `resync`。
 
 ### 原型参数
 
-`post_delay: 1000` 设置点击到首次购后识别的等待时间；完成特征、截止时间以及普通购买与自动升星的差异随后续实机样例确定。
+短 Pipeline 以购前卡面为点击条件，点击后等待 1 秒，再最多等 5 秒识别售空格；随后最多等 8 秒核对金币与售空格。卡面锁定区与裁剪区取同一矩形，卡片被替换或仍处于动画时匹配不到，此时节点没有动作，按「未发送点击」返回 `failed`。未确认时保留 Pipeline 节点及最后截图，不重发点击。以 1-3 实机购买前后帧和模拟输入回放验证了售价 3、金币 20→17、目标格变空，遮掉目标卡面后不发送点击；封装命令的游戏内输入待验证。

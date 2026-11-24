@@ -22,10 +22,12 @@ class PreparationTests(unittest.TestCase):
         self.reader.tasker = Mock()
         self.reader.score = Mock(return_value=0)
         self.reader.numbers = Mock(return_value={"result": "success"})
+        self.reader.health = Mock(return_value=80)
         self.reader.header = Mock(return_value={"layout": "closed", "node": "1-1", "phase_box": [430, 33, 80, 24]})
         self.reader.action_button = Mock(return_value={"button_text": "出战", "next_action": "start-battle"})
         self.reader.inventory = Mock()
         self.reader.inventory.read.return_value = None
+        self.reader.special_items = Mock(return_value={})
         self.reader.emblems = Mock()
         self.reader.emblems.read.return_value = {}
         self.reader.portraits = [("云璃", [None, None]), ("火花", [None, None])]

@@ -49,6 +49,7 @@ class ObserveTests(unittest.TestCase):
                 patch('screens.shop.read_stars', side_effect=[None, 2, None]) as stars:
             result = observe(self.session)
         self.assertEqual(result['shop'], 'open')
+        self.assertIsNone(result['health'])
         self.assertEqual(result['gold'], 9)
         self.assertEqual(result['shop_slots'], {'shop_1': '白露', 'shop_2': '刻律德菈', 'shop_3': '银狼LV.999',
                                                'shop_4': None, 'shop_5': None})

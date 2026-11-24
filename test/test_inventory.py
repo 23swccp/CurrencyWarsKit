@@ -84,9 +84,11 @@ class InventoryTests(unittest.TestCase):
         reader.action_button = Mock(return_value={"button_text": "出战", "next_action": "start-battle"})
         reader.capacity_warning = Mock(return_value={})
         reader.numbers = Mock(return_value={"result": "uncertain", "gold": None})
+        reader.health = Mock(return_value=80)
         reader.slots = Mock(return_value={"slots": {"front_1": None, **{f"bench_{i}": None for i in range(1, 10)}},
                                         "backstage_count": 6})
         reader.inventory = self.reader
+        reader.special_items = Mock(return_value={})
         reader.emblems = Mock()
         reader.emblems.read.return_value = {}
         image = sample()

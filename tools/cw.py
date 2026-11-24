@@ -28,6 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description="货币战争 CLI：窗口连接与常驻服务")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="查询后台服务状态")
+    commands.add_parser("battle-result", help="查询最近一场战斗回执")
     commands.add_parser("stop", help="等待当前操作结束，释放连接并停止服务")
     commands.add_parser("resync", help="重新截图")
     commands.add_parser("version", help="查看程序版本")
@@ -51,6 +52,8 @@ def main():
     actions.add_parser("collect", help="按住鼠标沿右侧奖励区遍历一轮并截图")
     actions.add_parser("shop-open", help="打开商店并确认布局")
     actions.add_parser("shop-close", help="收起商店并确认布局")
+    buy = actions.add_parser("buy", help="购买一个商店角色并核对成交")
+    buy.add_argument("--slot", required=True, choices=[f"shop_{i}" for i in range(1, 6)])
     actions.add_parser("trail-shop-open", help="打开开拓商店并读取货架")
     actions.add_parser("trail-shop-close", help="关闭开拓商店并确认备战")
     trail_buy = actions.add_parser("trail-shop-buy", help="购买一个开拓商品并确认扣款换货")
@@ -70,12 +73,18 @@ def main():
     box.add_argument("--slot", required=True, choices=[f"bench_{i}" for i in range(1, 10)])
     reward = actions.add_parser("armament-choose", help="领取指定武装箱装备并核对到账")
     reward.add_argument("--option", required=True, type=int, choices=range(1, 5))
+    special = actions.add_parser("special-use", help="对角色使用特殊道具")
+    special.add_argument("--item", choices=("privilege", "luck"), required=True)
+    special.add_argument("--target", choices=[f"{area}_{i}" for area, count in (("front", 4), ("back", 7)) for i in range(1, count + 1)], required=True)
+    choice = actions.add_parser("special-choose", help="选择特殊道具的装备选项")
+    choice.add_argument("--option", type=int, choices=range(1, 5), required=True)
     experience = actions.add_parser("buy-experience", help="按经验量分次购买并核对到账")
     experience.add_argument("--xp", type=int, required=True, help="要购买的经验，须为 4 的正整数倍")
     sell = actions.add_parser("sell", help="出售指定备战席角色，确认后排入后台补领")
     sell.add_argument("--from", dest="source", choices=[f"bench_{i}" for i in range(1, 10)], required=True)
     actions.add_parser("start-battle", help="点击出战一次，最多等待十秒确认战斗")
     actions.add_parser("continue-battle", help="点击继续挑战，等待并进入备战流程")
+    actions.add_parser("settle", help="从挑战成功逐页读取并点击，回到货币战争首页")
     actions.add_parser("protagonist-open", help="打开主角选择页")
     actions.add_parser("protagonist-confirm", help="确认主角与光环，继续备战")
     character = actions.add_parser("protagonist-character", help="拖选主角角色")
@@ -149,10 +158,12 @@ def main():
                               "supply": ("option",), "supply-refresh": (), "encounter": ("option",),
                               "encounter-refresh": (), "tea-break-choose": ("option",),
                               "tea-break-commission": ("option",),
-                              "start-battle": (), "continue-battle": (), "protagonist-open": (),
+                              "start-battle": (), "continue-battle": (), "settle": (), "protagonist-open": (),
                               "protagonist-confirm": (), "protagonist-character": ("slot",),
                               "protagonist-aura": ("option",), "protagonist-refresh": ("option",),
                               "armament-open": ("slot",), "armament-choose": ("option",),
+                              "special-use": ("item", "target"), "special-choose": ("option",),
+                              "buy": ("slot",),
                               "buy-experience": ("xp",), "sell": ("source",), "shop-open": (), "shop-close": (),
                               "trail-shop-open": (), "trail-shop-close": (), "trail-shop-buy": ("slot",),
                               "refresh": ()}[args.action]

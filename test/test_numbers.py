@@ -20,6 +20,41 @@ def texts(**changes):
 
 
 class NumberTests(unittest.TestCase):
+    def test_health_from_saved_preparation_frames(self):
+        fixtures = Path(__file__).parent / "fixtures" / "preparation"
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        for name, health in (("gold-eight.webp", 80), ("level-five-hover.webp", 88),
+                             ("deployment-six.webp", 92), ("health-hundred.webp", 100)):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                self.assertEqual(reader.health(image), health)
+
+    def test_deployment_region_reads_six_of_six(self):
+        path = Path(__file__).parent / "fixtures" / "preparation" / "deployment-six.webp"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        self.assertEqual(reader.numbers(image)["deployment"], {"current": 6, "limit": 6})
+
+    def test_level_region_reads_hovered_level_five(self):
+        path = Path(__file__).parent / "fixtures" / "preparation" / "level-five-hover.webp"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        self.assertEqual(reader.numbers(image)["level"], 5)
+
+    def test_gold_region_reads_eight_from_saved_preparation_frame(self):
+        path = Path(__file__).parent / "fixtures" / "preparation" / "gold-eight.webp"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        reader.load_ocr()
+        self.assertEqual(reader.integer(image, "gold", NUMBERS["gold"]), 8)
+
     def test_gold_region_reads_three_digits_from_saved_preparation_frame(self):
         path = Path(__file__).parent / "fixtures" / "armament" / "advanced-bench.webp"
         with Image.open(path) as source:
@@ -106,12 +141,15 @@ class NumberTests(unittest.TestCase):
         reader.slots = Mock(return_value={"slots": slots, "backstage_count": 6})
         reader.inventory = Mock()
         reader.inventory.read.return_value = None
+        reader.special_items = Mock(return_value={})
         reader.emblems = Mock()
         reader.emblems.read.return_value = {}
         reader.numbers = Mock(side_effect=[parse_numbers(texts()), parse_numbers(texts(gold=""))])
+        reader.health = Mock(side_effect=[80, None])
         first, second = object(), object()
         self.assertEqual(reader.observe(first)["gold"], 31)
         result = reader.observe(second)
+        self.assertIsNone(result["health"])
         self.assertIsNone(result["gold"])
         self.assertEqual(result["slots"], slots)
         self.assertEqual(result["result"], "uncertain")

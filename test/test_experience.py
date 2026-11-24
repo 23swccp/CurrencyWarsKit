@@ -102,6 +102,18 @@ class ExperienceTests(TestCase):
         self.assertFalse(result["purchase_pending"])
         self.assertEqual(session.controller.clicks, [])
 
+    def test_glowing_button_accepts_purchase_and_verifies_result(self):
+        for name in ("glowing-button.png", "glowing-button-upper.png"):
+            with self.subTest(frame=name):
+                session = self.session([numbers(21, 30, level=6, required=40),
+                                        numbers(17, 34, level=6, required=40)])
+                path = Path(__file__).parent / "fixtures" / "experience" / name
+                with Image.open(path) as source:
+                    session.controller.image[826:1017, 230:368] = np.asarray(source.convert("RGB"))[:, :, ::-1]
+                result = ROUTES["/buy-experience"](session, {"xp": 4})
+                self.assertEqual(result["result"], "success", result)
+                self.assertEqual(session.controller.clicks, [(297, 860)])
+
     def test_verified_purchase_reports_progress_if_screenshot_save_fails(self):
         session = self.session([numbers(12, 0), numbers(8, 0, level=4, required=8)])
         session.save_image.side_effect = OSError("截图写入失败")

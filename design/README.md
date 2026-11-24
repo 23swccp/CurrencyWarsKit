@@ -13,6 +13,7 @@
 | `observe` | [投资策略](strategy.md) | 现场读取三项、单项刷新、选择确认及后续界面 |
 | `observe`、`act supply`、`act supply-refresh` | [补给选择](supply.md) | 五列选项、可选刷新、单选计数验证与备战衔接 |
 | `observe`、`act armament-open`、`act armament-choose` | [武装箱](armament.md) | 识别箱卡、读取四选一与核对库存到账 |
+| `observe`、`act special-use`、`act special-choose` | [特殊道具](special-items.md) | 道具定位、选项读取、确认与装备栏重读 |
 | `observe`、`act encounter`、`act encounter-refresh` | [遭遇节点](encounter.md) | 难度和奖励读取、整体刷新、选择确认与返回备战 |
 | `prepare`、`act tea-break-choose`、`act tea-break-commission` | [幕后茶歇](tea-break.md) | 事件分支、委托确认、金币结算和下一节点 |
 | 选择主角 | [主角与光环](protagonist.md) | 1-9、2-9 的角色拖选、两侧光环、付费刷新与完成依据 |
@@ -20,6 +21,7 @@
 | 共舞选择（设计） | [梦境交织](dreamweave.md) | 自动选中两张卡、通过左侧羁绊行核对结果 |
 | 备战羁绊（设计） | [羁绊识别](traits.md) | 同帧读取左侧名称、人数、档位与连携图标 |
 | `act start-battle`、`observe` | [战斗阶段](battle.md) | 入场确认、旗帜监测与五秒结算检查 |
+| `act settle` | [整局结算](settlement.md) | 三段 Pipeline 的点击与到达判定、结算数据读取与停止条件 |
 | `buy` | [购买角色](buy.md) | 命令时序、商店展开状态、单次购买的检查与判定 |
 | `act buy-experience --xp N` | [购买经验](experience.md) | 批量购买、逐次核对扣款与经验、部分完成时的返回 |
 | 装备合成（设计） | [装备合成](equipment-synthesis.md) | 配方与产物预览、指定材料拖动、结果核验 |

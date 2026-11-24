@@ -1,7 +1,7 @@
 """按同一优先级识别备战布局和选择界面。"""
 
 from game.actions import BUTTON_ACTIONS
-from screens import armament, tea_break, trail_shop
+from screens import armament, tea_break, trail_shop, special_items
 from screens.encounter import complete as encounter_complete
 from screens.preparation import layout
 from screens.protagonist import observation as protagonist_observation
@@ -11,6 +11,13 @@ from screens.supply import complete as supply_complete
 
 def identify(session, image):
     preparation = session.preparation_reader()
+    if kind := special_items.panel(preparation, image):
+        return {"result": "success", "screen": "特殊道具选择", "item": kind, "needs_ai": True}
+    # 防：标题漏识时，使用道具后的已读选项仍可确认唯一弹窗。
+    if session.special_item in special_items.ITEMS:
+        result = special_items.read(preparation, image, session.special_item)
+        if special_items.named_equipment(result):
+            return result
     # 防：选择界面可能保留底下的备战标题和按钮，优先检查专用界面。
     if title := armament.panel(preparation, image):
         return {"result": "success", "screen": "武装箱选择", "title": title, "needs_ai": True}
@@ -36,6 +43,8 @@ def identify(session, image):
 
 def read_choice(session, image, scene):
     match scene["screen"]:
+        case "特殊道具选择":
+            return scene if "options" in scene else special_items.read(session.preparation_reader(), image, scene["item"])
         case "武装箱选择":
             return armament.read(session.preparation_reader(), image, scene["title"])
         case trail_shop.SCREEN:

@@ -2,13 +2,16 @@
 
 from itertools import count
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 import numpy as np
+from PIL import Image
 
 from game.input import InputUncertain
 from service import Session
 from screens.strategy import CONFIRM, OPTIONS, REFRESH, Strategy, StrategyOperation
+from screens.preparation import Preparation
 
 
 def observation(counts=(1, 1, 1), names=("策略甲", "策略乙", "策略丙")):
@@ -35,6 +38,16 @@ class StrategyReaderTests(unittest.TestCase):
         self.assertEqual([o["refreshes_left"] for o in result["options"]], [0, 1, 2])
         self.assertEqual([o["name"] for o in result["options"]], ["策略甲", "策略乙", "策略丙"])
         self.assertTrue(all(c.args[0] is self.image for c in self.reader.text.call_args_list))
+
+    def test_live_strategy_before_and_after_selection(self):
+        preparation = Preparation()
+        self.addCleanup(preparation.close)
+        reader = Strategy(preparation)
+        fixtures = Path(__file__).parent / "fixtures" / "strategy"
+        for name, expected in (("before.webp", None), ("selected.webp", 2)):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                self.assertEqual(reader.selected(image), expected)
 
     def test_partial_cards_keep_unknown_separate_from_zero(self):
         self.reader.text = Mock(side_effect=["", "效果甲", "刷新次数0",

@@ -125,7 +125,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(data["result"], "failed")
 
     def test_every_cli_command_has_a_route(self):
-        commands = {"status", "stop", "resync", "screenshot", "navigate", "observe",
+        commands = {"status", "battle-result", "stop", "resync", "screenshot", "navigate", "observe",
                     "prepare", "overlay", "rewards"}
         actions = {"click", "drag", "press", "move", "collect", "start-battle", "continue-battle",
                    "environment", "strategy-refresh", "strategy-choose", "protagonist-open",
@@ -133,7 +133,7 @@ class HttpTests(unittest.TestCase):
                    "protagonist-confirm", "sell", "shop-open", "shop-close", "refresh", "supply-refresh", "supply-choose",
                    "encounter-refresh", "encounter-choose", "armament-open", "armament-choose", "buy-experience",
                    "trail-shop-open", "trail-shop-buy", "trail-shop-close",
-                   "tea-break-choose", "tea-break-commission"}
+                   "tea-break-choose", "tea-break-commission", "special-use", "special-choose", "buy", "settle"}
         self.assertEqual({path[1:] for path in service.ROUTES} | {"stop"}, commands | actions)
 
     def test_busy_requests_do_not_capture(self):

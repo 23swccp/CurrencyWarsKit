@@ -112,7 +112,7 @@ class Navigator:
             return {**self.session.save_image(image), "result": "uncertain", "message": "未能确认模式选择页面"}
         if any("进入标准博弈" in t for t in button):
             return self.enter_rank()
-        # 防：未读到模式按钮文字时返回 uncertain，不按默认模式点击。
+        # 防：模式按钮文字漏读。
         if not any("进入超频博弈" in t for t in button):
             return {**self.session.capture(), "result": "uncertain", "message": "无法确认当前模式"}
         self.click(*STANDARD)
