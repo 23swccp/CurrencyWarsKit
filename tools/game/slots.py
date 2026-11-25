@@ -49,7 +49,7 @@ NUMBERS = {
     "gold": (1625, 897, 66, 48),
     "level": (255, 893, 80, 43),
     "experience": (250, 935, 96, 33),
-    "experience_cost": (302, 975, 38, 36),
+    "experience_cost": (285, 970, 52, 44),
     "deployment": (890, 225, 150, 75),
 }
 

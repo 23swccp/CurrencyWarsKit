@@ -113,6 +113,8 @@ class ShopReadingTests(unittest.TestCase):
                                                "shop_4": "波提欧", "shop_5": "桂乃芬"})
         self.assertEqual(cards["shop_stars"], {"shop_1": 1, "shop_2": 2, "shop_3": None,
                                                "shop_4": 1, "shop_5": 1})
+        self.assertEqual(cards["shop_prices"], {"shop_1": 1, "shop_2": 3, "shop_3": None,
+                                                "shop_4": 1, "shop_5": 1})
         self.assertEqual(cards["shop_empty_slots"], ["shop_3"])
         self.assertEqual(cards["shop_goods"], {})
 

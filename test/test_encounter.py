@@ -56,6 +56,14 @@ class ReaderTests(TestCase):
         self.assertEqual(result['options'][0]['difficulty'], 1)
         self.assertIsNone(result['options'][1]['reward']['count'])
 
+    def test_equipment_reward_without_count_is_still_complete(self):
+        reader = Encounter.__new__(Encounter)
+        reader.text = Mock(side_effect=['遭遇其一', '金币', '2', '遭遇其三', '光能电池', '', '剩余次数：1'])
+        reader.selected = Mock(return_value=None)
+        result = reader.read('frame')
+        self.assertTrue(complete(result))
+        self.assertEqual(result['options'][1]['reward'], {'text': '光能电池', 'count': None})
+
 
 class OperationTests(TestCase):
     def setUp(self):

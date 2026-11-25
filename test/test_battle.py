@@ -8,7 +8,8 @@ from unittest.mock import Mock, call, patch
 import numpy as np
 from PIL import Image
 
-from screens.battle import Battle, CONTINUE_BUTTON, Monitor, START, continue_battle, finish, start, settlement_details
+from screens.battle import (Battle, CONTINUE_BUTTON, LIMIT_CONFIRM, Monitor, START, continue_battle, finish,
+                            limit_warning, start, settlement_details)
 from screens.preparation import Preparation
 from game.input import InputUncertain
 from service import ROUTES, Session
@@ -29,12 +30,20 @@ class BattleReaderTests(unittest.TestCase):
             image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
         preparation = Preparation()
         self.addCleanup(preparation.close)
-        self.assertEqual(settlement_details(image, preparation), {"outcome": "victory", "health": 75})
+        self.assertEqual(settlement_details(image, preparation),
+                         {"outcome": "victory", "title": "挑战成功", "health": 75})
 
     def test_unrecognized_settlement_does_not_invent_outcome_or_health(self):
         preparation = Mock()
         preparation.text.side_effect = ["其他标题", ""]
-        self.assertEqual(settlement_details(self.image, preparation), {"outcome": "unknown", "health": None})
+        self.assertEqual(settlement_details(self.image, preparation),
+                         {"outcome": "unknown", "title": "其他标题", "health": None})
+
+    def test_plane_end_title_is_reported_without_claiming_victory(self):
+        preparation = Mock()
+        preparation.text.side_effect = ["挑战结束", "小队生命值1"]
+        self.assertEqual(settlement_details(self.image, preparation),
+                         {"outcome": "unknown", "title": "挑战结束", "health": 1})
 
     def test_flag_or_intro_confirms_entry(self):
         for marker in ("flag", "intro"):
@@ -108,6 +117,14 @@ class BattleReaderTests(unittest.TestCase):
 
 
 class BattleOperationTests(unittest.TestCase):
+    def test_limit_warning_reads_saved_confirmation_frame(self):
+        path = Path(__file__).parent / "fixtures" / "battle" / "limit-warning.png"
+        with Image.open(path) as source:
+            image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        self.assertTrue(limit_warning(image, reader))
+
     def setUp(self):
         self.now = 0.0
         self.captures = []
@@ -124,8 +141,11 @@ class BattleOperationTests(unittest.TestCase):
         self.sleep_patch = patch("screens.battle.sleep", side_effect=self.advance)
         self.clock_patch.start()
         self.sleep = self.sleep_patch.start()
+        self.warning_patch = patch("screens.battle.limit_warning", return_value=False)
+        self.warning = self.warning_patch.start()
         self.addCleanup(self.clock_patch.stop)
         self.addCleanup(self.sleep_patch.stop)
+        self.addCleanup(self.warning_patch.stop)
 
     def advance(self, seconds):
         self.now += seconds
@@ -156,6 +176,7 @@ class BattleOperationTests(unittest.TestCase):
         self.assertEqual(result["screenshot"], "frame-6.png")
         self.assertEqual(self.captures, [0, 2, 4, 6, 8, 10])
         self.assertEqual(self.reader.recognize.call_count, 5)
+        self.assertEqual(self.warning.call_count, 5)
         self.session.controller.post_click.assert_called_once_with(*START)
         self.session.controller.post_click_key.assert_not_called()
         self.session.save_image.assert_called_once_with("frame-6")
@@ -174,6 +195,33 @@ class BattleOperationTests(unittest.TestCase):
             {"result": "success", "screen": "战斗"}]
         self.assertEqual(start(self.session, self.reader)["result"], "success")
         self.assertEqual(self.now, 10)
+
+    def test_out_of_limit_warning_is_confirmed_once_then_waits(self):
+        self.warning.side_effect = [True, False, False]
+        self.reader.recognize.side_effect = [{"result": "uncertain", "screen": "未知"}] * 2 + [
+            {"result": "success", "screen": "战斗"}]
+        result = start(self.session, self.reader)
+        self.assertEqual(result["screen"], "战斗")
+        self.assertEqual(self.session.controller.post_click.call_args_list,
+                         [call(*START), call(*LIMIT_CONFIRM)])
+
+    def test_persistent_warning_confirms_once_and_times_out(self):
+        self.warning.return_value = True
+        result = start(self.session, self.reader)
+        self.assertEqual(result["result"], "uncertain")
+        self.assertIn("确认人数后 10 秒", result["message"])
+        self.assertEqual(self.session.controller.post_click.call_args_list,
+                         [call(*START), call(*LIMIT_CONFIRM)])
+        self.assertEqual(result["screenshot"], "frame-7.png")
+
+    def test_limit_confirm_click_failure_is_uncertain(self):
+        self.warning.return_value = True
+        self.session.controller.post_click.side_effect = [
+            Mock(**{"wait.return_value.succeeded": True}),
+            Mock(**{"wait.return_value.succeeded": False})]
+        result = start(self.session, self.reader)
+        self.assertEqual(result["result"], "uncertain")
+        self.assertIn("InputUncertain", result["message"])
 
     def test_settlement_can_arrive_before_battle_match(self):
         self.reader.recognize.return_value = {"result": "success", "screen": "本场结算", "needs_ai": True}

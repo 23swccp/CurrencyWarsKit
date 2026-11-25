@@ -14,6 +14,7 @@ class ObserveTests(unittest.TestCase):
         self.preparation = self.session.preparation_reader.return_value
         self.preparation.score.return_value = 0
         self.preparation.action_button.return_value = {'next_action': None}
+        self.preparation.enlarged_text.return_value = '1'
         self.session.protagonist_reader.return_value.selection_page.return_value = False
         for method in ('supply_reader', 'encounter_reader', 'strategy_reader'):
             getattr(self.session, method).return_value.page.return_value = False

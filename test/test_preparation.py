@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 
 from recognition_debug import trace
-from screens.preparation import Preparation, Recognition
+from screens.preparation import Preparation, Recognition, progress
 from service import Session
 from game.slots import ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, FRONT, ICONS, PHASE, SHOP
 
@@ -125,6 +125,20 @@ class PreparationTests(unittest.TestCase):
             self.image[593:602] = np.asarray(band)[:, :, ::-1]
         return self.image
 
+    def test_progress_splits_plane_index_and_leaves_unknown_nodes_empty(self):
+        self.assertEqual(progress("2-4"), {"plane": 2, "index": 4, "nodes": 9, "remaining": 5})
+        self.assertEqual(progress("1-9"), {"plane": 1, "index": 9, "nodes": 9, "remaining": 0})
+        self.assertEqual(progress("3-5"), {"plane": 3, "index": 5, "nodes": 7, "remaining": 2})
+        self.assertEqual(progress("4-1"), {"plane": 4, "index": 1, "nodes": None, "remaining": None})
+        self.assertEqual(progress(None), {})
+        self.assertEqual(progress("未知"), {})
+
+    def test_positions_come_from_roster_and_skip_unknown_cards(self):
+        reader = Preparation.__new__(Preparation)
+        self.assertEqual(reader.positions({"name": "寒鸦"}), {"positions": ["back"]})
+        self.assertEqual(reader.positions({"name": "缇宝"}), {"positions": ["front", "back"]})
+        self.assertEqual(reader.positions({"unknown": True, "candidates": []}), {})
+
     def test_empty_and_unknown_slots_are_distinct(self):
         self.reader.score = Mock(side_effect=[0.9, 0.699] + [0.9] * 18 + [0])
         self.reader.match = Mock(return_value={"unknown": True, "candidates": []})
@@ -147,12 +161,16 @@ class PreparationTests(unittest.TestCase):
         observer = Mock()
 
         with trace(observer):
-            slots = self.reader.recognize(image)["slots"]
+            result = self.reader.recognize(image)
+        slots = result["slots"]
 
         fronts = [slots[f"front_{index}"] for index in range(1, 5)]
         self.assertEqual([card["stars"] for card in fronts], [3, 3, 2, 1])
         self.assertTrue(fronts[0]["unknown"])
         self.assertEqual(fronts[1]["name"], "云璃")
+        self.assertEqual(fronts[1]["positions"], ["front", "back"])
+        self.assertEqual(result["front_capacity"], 4)
+        self.assertEqual((result["plane"], result["index"], result["nodes"], result["remaining"]), (1, 1, 9, 8))
         observer.mark.assert_any_call(image, (697, 427, 91, 40), "front_1 星级", "crop")
 
     def test_same_character_can_occupy_multiple_slots(self):

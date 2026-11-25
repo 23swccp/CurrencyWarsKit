@@ -22,7 +22,7 @@ from game.slots import (
     ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, CARDS_BY_BACKSTAGE, CARD_SIZE, FRONT,
     HEADER, HEALTH, ICONS, NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN, SLOTS_BY_BACKSTAGE,
 )
-from game.traits import catalog, projection
+from game.traits import catalog, projection, roster
 
 
 ASSETS = Path(__file__).resolve().parents[2] / "asset"
@@ -32,6 +32,19 @@ WORKERS = 16
 MIN_SCORE = 0.8
 MIN_MARGIN = 0.1
 SEVEN_EMPTY_TEMPLATES = {f"back_{index}": f"back_seven_{index}" for index in range(4, 8)}
+# 每个位面的节点数：位面 1 打到 1-9、位面 2 记录到 2-9、位面 3 节点条只有 7 个且 3-7 是最后一关。
+PLANE_NODES = {1: 9, 2: 9, 3: 7}
+
+
+def progress(node):
+    """把 1-4 这样的节点号拆成位面内进度，供 AI 判断还剩几关。"""
+    match = re.fullmatch(r"(\d+)-(\d+)", node or "")
+    if not match:
+        return {}
+    plane, index = int(match[1]), int(match[2])
+    total = PLANE_NODES.get(plane)
+    return {"plane": plane, "index": index, "nodes": total,
+            "remaining": None if total is None else max(0, total - index)}
 
 
 def parse_numbers(texts):
@@ -156,7 +169,7 @@ class Preparation(Recognition):
         self.header_result = None
         self.inventory = Inventory()
         self.emblems = Emblems(self.resource, self.tasker, catalog()["emblems"])
-        for name in ("shop", "icons", "shop_open", "sell", "armament", "armament_advanced", "armament_aha", "armament_open",
+        for name in ("shop", "icons", "shop_open", "armament", "armament_advanced", "armament_aha", "armament_open",
                      "special_privilege_icon", "special_luck_icon", "special_privilege_title", "special_luck_title",
                      "bench_warning", *CARDS, *SEVEN_EMPTY_TEMPLATES.values()):
             with Image.open(ASSETS / "preparation" / f"{name}.png") as image:
@@ -214,10 +227,12 @@ class Preparation(Recognition):
         capacity = self.capacity_warning(image)
         if not capacity and all(slots[slot] is not None for slot in BENCH):
             capacity = {"reason": "bench_full", "needs_ai": True}
+        node = self.header(image)["node"]
         return {**result, **capacity, "inventory": self.inventory.read(image), "special_items": self.special_items(image),
                 "trait_projection": projection(slots, self.emblems.read(image, slots),
                                                partial=result["backstage_count"] is None),
-                **self.action_button(image), "node": self.header(image)["node"],
+                **self.action_button(image), "node": node,
+                "front_capacity": len(FRONT), **progress(node),
                 "recognition_ms": round((perf_counter() - started) * 1000, 1)}
 
     def special_items(self, image):
@@ -262,10 +277,22 @@ class Preparation(Recognition):
 
     def numbers(self, image):
         self.load_ocr()
-        return parse_numbers({name: self.text(image, name, roi) for name, roi in NUMBERS.items()})
+        texts = {name: self.text(image, name, roi) for name, roi in NUMBERS.items()
+                 if name != "experience_cost"}
+        # 防：经验费用是按钮角落的小字，等级 8、9 时直接认会读空，放大后再认。
+        texts["experience_cost"] = self.enlarged_text(image, "experience_cost", NUMBERS["experience_cost"])
+        return parse_numbers(texts)
 
     def health(self, image):
-        return self.integer(image, "小队生命值", HEALTH)
+        self.load_ocr()
+        # 防：血量字号小、左边有心形图标，直接认会读空（3-7 的 71）；放大后再取数字，
+        # 框宽保留三位数。
+        text = re.sub(r"\s+", "", self.enlarged_text(image, "小队生命值", HEALTH))
+        # 防：OCR 把 100 认成 1O0、71 认成 7l 时只取数字会得到 1、7，比读空更容易误判。
+        if not re.fullmatch(r"[.\d]+", text):
+            return None
+        match = re.search(r"\d+", text)
+        return int(match[0]) if match else None
 
     def load_ocr(self):
         if not self.ocr_ready:
@@ -302,6 +329,13 @@ class Preparation(Recognition):
         x, y = SLOTS_BY_BACKSTAGE[backstage][slot]
         return self.score(image, f"{name}.png", (x-21, y-29, 42, 58)) >= threshold
 
+    def positions(self, identity):
+        """角色的前台／后台定位，来自角色库；库外图标不猜。"""
+        if "name" not in identity:
+            return {}
+        characters, _, _ = roster()
+        return {"positions": characters.get(identity["name"], {}).get("positions")}
+
     def card(self, image, slot, backstage=6):
         if self.empty(image, slot, backstage):
             return None
@@ -312,7 +346,7 @@ class Preparation(Recognition):
         focus(image, (min(xs), min(ys), max(xs)-min(xs), max(ys)-min(ys)), f"{slot} 卡片裁剪", "crop")
         card = Image.fromarray(image).transform(CARD_SIZE, Image.Transform.QUAD, quad, Image.Resampling.BICUBIC)
         identity = self.match(np.asarray(card.crop(PORTRAIT)).copy())
-        return {**identity, "stars": card_stars.read(image, card, quad, slot)}
+        return {**identity, **self.positions(identity), "stars": card_stars.read(image, card, quad, slot)}
 
     def slots(self, image):
         backstage = backstage_size(image)

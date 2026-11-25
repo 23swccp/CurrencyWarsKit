@@ -20,6 +20,7 @@ class ActionButtonTests(unittest.TestCase):
         self.reader.button_result = None
         self.reader.load_ocr = Mock()
         self.reader.text = Mock(return_value="出战")
+        self.reader.enlarged_text = Mock(return_value="80")
         self.image = np.zeros((1080, 1920, 3), dtype="uint8")
 
     def test_known_labels_map_and_unknown_names_keep_their_text(self):

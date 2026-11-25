@@ -15,7 +15,8 @@ COST = 4
 XP = 4
 LABEL = (230, 835, 136, 48)
 TASK = "BuyExperience"
-TIMEOUT = 3
+# 升级后等级条跳动和金币数字滚动实机超过 3 秒，等待窗口放宽到 6 秒。
+TIMEOUT = 6
 INTERVAL = 0.3
 
 PIPELINE = {
@@ -94,11 +95,11 @@ def buy(session, xp):
     tasker = None
     while confirmed < count:
         exp = numbers["experience"]
-        # 防：购前金币、等级、经验或费用漏读。
-        if None in (numbers["gold"], numbers["level"], exp["current"], exp["required"],
-                    numbers["experience_cost"]):
-            return finish("uncertain", "购买前的金币、等级、经验或费用待确认")
-        if numbers["experience_cost"] != COST:
+        # 防：购前金币、等级或经验漏读。
+        if None in (numbers["gold"], numbers["level"], exp["current"], exp["required"]):
+            return finish("uncertain", "购买前的金币、等级或经验待确认")
+        # 防：经验费用只在首笔前核对；后续笔的金币减少额由 received 逐笔确认。
+        if not confirmed and numbers["experience_cost"] != COST:
             return finish("uncertain", "当前经验费用与每次 4 金币的购买规则不符")
         if numbers["gold"] < (count - confirmed) * COST:
             return finish("failed", "金币不足以完成剩余购买")

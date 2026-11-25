@@ -254,9 +254,9 @@ class Session:
         from screens.buy import buy
         return buy(self, slot)
 
-    def sell_character(self, source):
-        from screens.sell import sell
-        result = sell(self, source)
+    def sell_character(self, sources):
+        from screens.sell import sell_many
+        result = sell_many(self, sources)
         if result["result"] == "success":
             self.queue_collection(result)
         return result

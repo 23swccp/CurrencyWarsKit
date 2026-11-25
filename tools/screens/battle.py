@@ -18,6 +18,8 @@ INTRO = (830, 320, 185, 80)
 FLAG = (35, 0, 100, 65)
 CONTINUE = (740, 830, 440, 130)
 CONTINUE_BUTTON = (960, 895)
+LIMIT_WARNING = (690, 490, 540, 55)
+LIMIT_CONFIRM = (1172, 684)
 PREPARATION_DELAY = 8
 TIMEOUT = 10
 INTERVAL = 2
@@ -32,9 +34,17 @@ def settlement_details(image, preparation):
     title = re.sub(r"\s+", "", preparation.text(image, "战斗结果", RESULT_TITLE))
     health_text = re.sub(r"\s+", "", preparation.text(image, "结算生命值", RESULT_HEALTH))
     health = re.fullmatch(r"小队生命值(\d+)", health_text)
-    # 防：已确认普通及最终战胜利标题，其他标题不推断胜负。
+    # 防：已确认普通及最终战胜利标题，其他标题不推断胜负；原文交给调用方判断。
     return {"outcome": "victory" if title == "挑战成功" else "unknown",
+            "title": title or None,
             "health": int(health[1]) if health else None}
+
+
+def limit_warning(image, preparation):
+    """出战后上阵人数未达上限时的确认框文字（实机 1-3，4/5 上阵）。"""
+    preparation.load_ocr()
+    text = re.sub(r"\s+", "", preparation.text(image, "可出战人数提示", LIMIT_WARNING))
+    return "人数未达上限" in text
 
 
 class Battle(Recognition):
@@ -211,7 +221,9 @@ def start(session, reader):
         if not session.controller.post_click(*START).wait().succeeded:
             raise InputUncertain("出战点击结果待核对")
         deadline = monotonic() + TIMEOUT
+        preparation = session.preparation_reader()
         result = {"result": "uncertain", "screen": "未知"}
+        confirmed = False
         while True:
             remaining = deadline - monotonic()
             if remaining <= 0:
@@ -221,8 +233,15 @@ def start(session, reader):
             result = reader.recognize(image)
             if result["result"] == "success":
                 break
+            # 防：上阵人数未达上限时出战会先弹确认框，只点一次并重新计时。
+            if not confirmed and result["screen"] == "未知" and limit_warning(image, preparation):
+                if not session.controller.post_click(*LIMIT_CONFIRM).wait().succeeded:
+                    raise InputUncertain("出战人数确认点击结果待核对")
+                confirmed = True
+                deadline = monotonic() + TIMEOUT
         if result["result"] != "success":
-            result = {**result, "needs_ai": True, "message": "出战后 10 秒内战斗界面仍待确认"}
+            waited = "确认人数后 10 秒" if confirmed else "10 秒"
+            result = {**result, "needs_ai": True, "message": f"出战后{waited}内战斗界面仍待确认"}
     except ERRORS as error:
         result = uncertain(error, "出战确认出错，附最近观察截图")
     reader.begin(result)

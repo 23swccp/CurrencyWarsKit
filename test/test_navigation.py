@@ -37,24 +37,45 @@ class NavigationTests(unittest.TestCase):
         nav.click.assert_not_called()
 
     def test_rank_reset_then_start(self):
-        nav = self.navigator([(["开始对局"], []), (["返回最高职级", "开始对局"], []),
-                              (["开始对局"], [])])
+        nav = self.navigator([(["开始对局"], []), (["开始对局"], [])])
+        nav.texts.side_effect = [["返回最高职级", "开始对局"]]
         with patch("flow.navigation.sleep") as sleep:
             result = nav.run()
         self.assertEqual(result["screen"], "投资环境")
+        self.assertTrue(result["rank_reset"])
         sleep.assert_called_once_with(5)
         nav.opening.assert_called_once_with()
         self.assertEqual(nav.click.call_args_list, [call(960, 843), call(1380, 966), call(1690, 966)])
 
-    def test_missing_return_button_does_not_start(self):
+    def test_rank_down_needs_another_frame_before_return_button(self):
         nav = self.navigator([(["开始对局"], []), (["开始对局"], [])])
+        nav.texts.side_effect = [["开始对局"], ["返回最高职级", "开始对局"]]
+        with patch("flow.navigation.sleep") as sleep, \
+                patch("flow.navigation.monotonic", side_effect=[0, 1, 2]):
+            result = nav.run()
+        self.assertTrue(result["rank_reset"])
+        self.assertIn(call(0.3), sleep.call_args_list)
+        self.assertEqual(nav.click.call_args_list, [call(960, 843), call(1380, 966), call(1690, 966)])
+
+    def test_highest_rank_without_return_button_starts_directly(self):
+        nav = self.navigator([(["开始对局"], [])])
+        with patch("flow.navigation.monotonic", side_effect=[0, 9]), patch("flow.navigation.sleep") as sleep:
+            result = nav.run()
+        self.assertEqual(result["screen"], "投资环境")
+        self.assertFalse(result["rank_reset"])
+        self.assertEqual(nav.click.call_args_list, [call(960, 843), call(1690, 966)])
+        sleep.assert_called_once_with(5)
+        nav.session.controller.post_click_key.assert_not_called()
+
+    def test_rank_page_without_any_button_stops_after_escape(self):
+        nav = self.navigator([(["开始对局"], [])])
+        nav.texts.return_value = []
         with patch("flow.navigation.monotonic", side_effect=[0, 9]):
             result = nav.run()
         self.assertIn("下移后", result["message"])
-        self.assertEqual(result["screen"], "职级选择")
         self.assertEqual(result["screenshot"], "after-esc.png")
         nav.session.controller.post_click_key.assert_called_once_with(0x1B)
-        nav.click.assert_called_once_with(960, 843)
+        self.assertEqual(nav.click.call_args_list, [call(960, 843)])
 
     def test_each_navigation_timeout_escapes_once_and_returns_new_page(self):
         scenarios = [
@@ -86,16 +107,19 @@ class NavigationTests(unittest.TestCase):
 
     def test_failed_escape_is_not_repeated_or_reported_as_a_page(self):
         from game.input import InputUncertain
-        nav = self.navigator([(["开始对局"], []), ([], [])])
+        nav = self.navigator([(["开始对局"], [])])
+        nav.texts.return_value = []
         nav.session.controller.post_click_key.return_value.wait.return_value.succeeded = False
         with patch("flow.navigation.monotonic", side_effect=[0, 9]):
             with self.assertRaises(InputUncertain):
                 nav.run()
         nav.session.controller.post_click_key.assert_called_once_with(0x1B)
-        nav.capture_image.assert_not_called()
+        # Esc 之前判位置只截一帧；Esc 失败后不再截图。
+        self.assertEqual(nav.capture_image.call_count, 1)
 
     def test_known_page_and_unknown_page_are_distinct(self):
         self.assertEqual(current_screen(["投资环境", "确认"]), "投资环境")
+        self.assertEqual(current_screen(["开始对局"]), "职级选择")
         self.assertEqual(current_screen(["下一步"]), "未知")
 
     def test_enter_standard_waits_for_rank_page(self):
@@ -164,7 +188,8 @@ class NavigationTests(unittest.TestCase):
 
     def test_escape_capture_failure_stops_without_more_input(self):
         from game.input import InputUncertain
-        nav = self.navigator([(["开始对局"], []), ([], [])])
+        nav = self.navigator([(["开始对局"], [])])
+        nav.texts.return_value = []
         nav.capture_image.side_effect = ["old-frame", RuntimeError("第二次截图失败")]
         with patch("flow.navigation.sleep"), patch("flow.navigation.monotonic", side_effect=[0, 9]):
             with self.assertRaisesRegex(InputUncertain, "第二次截图失败"):

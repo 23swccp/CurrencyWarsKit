@@ -448,7 +448,9 @@ class CliTests(unittest.TestCase):
                 request.assert_called_once_with(command, **kwargs)
 
     def test_sell_shop_and_rewards_send_expected_requests(self):
-        cases = ((["act", "sell", "--from", "bench_8"], "sell", {"data": {"from": "bench_8"}}),
+        cases = ((["act", "sell", "--from", "bench_8"], "sell", {"data": {"from": ["bench_8"]}}),
+                 (["act", "sell", "--from", "bench_2", "bench_5"], "sell",
+                  {"data": {"from": ["bench_2", "bench_5"]}}),
                  (["act", "move", "--from", "bench_2", "--to", "back_7"], "move",
                   {"data": {"from": "bench_2", "to": "back_7"}}),
                  (["act", "shop-open"], "shop-open", {"data": {}}),

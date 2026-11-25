@@ -69,8 +69,9 @@ class Encounter(Recognition):
             count = int(count_text) if re.fullmatch(r"\d+", count_text) else None
             option = {"slot": f"option_{index}", "title": title, "difficulty": difficulty,
                       "reward": {"text": reward, "count": count}}
-            # 防：难度或奖励 OCR 漏读，保留已识别内容交给 AI。
-            if difficulty is None or not reward or count is None:
+            # 防：难度或奖励文字 OCR 漏读，保留已识别内容交给 AI。
+            # 装备类奖励本来没有数量（实机 1-7 光能电池），count 为空不算未读全。
+            if difficulty is None or not reward:
                 option["unknown"] = True
             options.append(option)
         return {"screen": "遭遇", "title": "遭遇节点", "options": options,
@@ -136,7 +137,7 @@ class EncounterOperation:
         return self.wait(inspect, "遭遇刷新结果待核对")
 
     def choose(self, option, before):
-        # 防：已有选中项时改选行为尚未验证。
+        # 防：已有选中项时再点会改动已确认的选择，交回调用方核对。
         if before["selected"] is not None:
             return {**before, "result": "uncertain", "message": "已有选中项，请核对后操作"}
         resource = Resource()

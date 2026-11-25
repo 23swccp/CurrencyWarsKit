@@ -72,17 +72,25 @@ def read_product(image, reader, slot, center, name, lines):
     return result
 
 
+def read_price(image, reader, slot, center):
+    """卡底价格：字号很小，放大后再认；位置避开设在左侧的金币图标。"""
+    text = reader.enlarged_text(image, f"{slot} 价格", (center + 72, 288, 50, 36))
+    match = re.search(r"\d+", text)
+    return int(match[0]) if match else None
+
+
 def read_cards(image, reader):
     reader.load_ocr()
     characters, _, _ = roster()
     names = {}
     stars = {}
+    prices = {}
     empty_slots = []
     goods = {}
     for index, center in enumerate(CARD_CENTERS, 1):
         slot = f"shop_{index}"
         if reader.score(image, "shop_empty.png", (center - 40, 96, 80, 200)) >= EMPTY_SCORE:
-            names[slot] = stars[slot] = None
+            names[slot] = stars[slot] = prices[slot] = None
             empty_slots.append(slot)
             continue
         name = card_name(reader.text(image, f"{slot} 卡底名称", (center - 114, 288, 170, 34)))
@@ -97,7 +105,9 @@ def read_cards(image, reader):
                 goods[slot] = read_product(image, reader, slot, center, name, lines)
         names[slot] = name or None
         stars[slot] = None if slot in goods else read_stars(image, slot, center) or 1
-    return {"shop_slots": names, "shop_stars": stars, "shop_empty_slots": empty_slots, "shop_goods": goods}
+        prices[slot] = None if slot in goods else read_price(image, reader, slot, center)
+    return {"shop_slots": names, "shop_stars": stars, "shop_prices": prices,
+            "shop_empty_slots": empty_slots, "shop_goods": goods}
 
 
 def save(session, image, result, action, clicked):

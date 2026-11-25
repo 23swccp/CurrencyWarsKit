@@ -99,7 +99,7 @@ def buy(session, slot):
     # 防：购前金币少于实际售价。
     if evidence["gold_before"] < evidence["price"]:
         return rejected("failed", "金币不足")
-    # 防：备战席满时能否通过升星购买尚未确认。
+    # 防：备战席没有空位时新角色无处落地，先不点击。
     if not any(reader.empty(image, bench) for bench in BENCH):
         return rejected("uncertain", "备战席没有确认的空位")
     result = {**scene, "result": "uncertain", "needs_ai": True, "message": "购买结果待确认"}

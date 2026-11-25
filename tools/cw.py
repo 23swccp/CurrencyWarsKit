@@ -80,8 +80,9 @@ def main():
     choice.add_argument("--option", type=int, choices=range(1, 5), required=True)
     experience = actions.add_parser("buy-experience", help="按经验量分次购买并核对到账")
     experience.add_argument("--xp", type=int, required=True, help="要购买的经验，须为 4 的正整数倍")
-    sell = actions.add_parser("sell", help="出售指定备战席角色，确认后排入后台补领")
-    sell.add_argument("--from", dest="source", choices=[f"bench_{i}" for i in range(1, 10)], required=True)
+    sell = actions.add_parser("sell", help="出售指定备战席角色，可一次指定多个；确认后排入后台补领")
+    sell.add_argument("--from", dest="source", nargs="+", choices=[f"bench_{i}" for i in range(1, 10)],
+                      required=True, help="一个或多个备战席槽位，按给出顺序依次出售")
     actions.add_parser("start-battle", help="点击出战一次，最多等待十秒确认战斗")
     actions.add_parser("continue-battle", help="点击继续挑战，等待并进入备战流程")
     actions.add_parser("settle", help="从挑战成功逐页读取并点击，回到货币战争首页")
@@ -114,6 +115,9 @@ def main():
     # 防：游戏按 4 经验一笔购买。
     if args.command == "act" and args.action == "buy-experience" and (args.xp <= 0 or args.xp % 4):
         experience.error("--xp 须为 4 的正整数倍")
+    # 防：出售槽位重复，批量时会在同一格重复拖动。
+    if args.command == "act" and args.action == "sell" and len(set(args.source)) != len(args.source):
+        sell.error("出售槽位不能重复")
     if args.command == "version":
         data = {"result": "success", "version": VERSION}
     elif args.command == "echo":

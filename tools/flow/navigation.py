@@ -164,13 +164,25 @@ class Navigator:
 
     def reset_rank(self):
         self.click(*RANK_DOWN)
-        self.wait_button(lambda texts: any("返回最高职级" in t for t in texts), "下移后未能确认返回最高职级按钮")
-        self.click(*HIGHEST_RANK)
-        self.wait_button(lambda texts: any("开始对局" in t for t in texts)
-                         and not any("返回最高职级" in t for t in texts), "未能确认最高职级复位")
+        deadline = monotonic() + 4
+        reset = False
+        while True:
+            button = self.texts(self.capture_image(), (1250, 900, 640, 145))
+            if any("返回最高职级" in t for t in button):
+                self.click(*HIGHEST_RANK)
+                self.wait_button(lambda texts: any("开始对局" in t for t in texts)
+                                 and not any("返回最高职级" in t for t in texts), "未能确认最高职级复位")
+                reset = True
+                break
+            if monotonic() >= deadline:
+                # 防：已是最高职级（实机 A8/3 顶层带锁）时下移无效，页面只剩开始对局。
+                if not any("开始对局" in t for t in button):
+                    self.timeout("下移后未能确认返回最高职级按钮")
+                break
+            sleep(0.3)
         self.click(*START_GAME)
         sleep(5)  # 用户指定开始对局后等待 5 秒。
-        return self.opening()
+        return {**self.opening(), "rank_reset": reset}
 
     def wait_text(self, roi, text):
         deadline = monotonic() + 8

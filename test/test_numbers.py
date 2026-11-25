@@ -25,7 +25,8 @@ class NumberTests(unittest.TestCase):
         reader = Preparation()
         self.addCleanup(reader.close)
         for name, health in (("gold-eight.webp", 80), ("level-five-hover.webp", 88),
-                             ("deployment-six.webp", 92), ("health-hundred.webp", 100)):
+                             ("deployment-six.webp", 92), ("health-hundred.webp", 100),
+                             ("health-one.png", 1), ("health-seventy-one.png", 71)):
             with self.subTest(frame=name), Image.open(fixtures / name) as source:
                 image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
                 self.assertEqual(reader.health(image), health)
@@ -64,6 +65,23 @@ class NumberTests(unittest.TestCase):
         reader.load_ocr()
         self.assertEqual(reader.integer(image, "gold", NUMBERS["gold"]), 132)
 
+    def test_experience_cost_region_reads_price_on_level_five_frame(self):
+        fixtures = Path(__file__).parent / "fixtures" / "preparation"
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        for name in ("level-five-hover.webp", "deployment-six.webp"):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                self.assertEqual(reader.integer(image, "experience_cost", NUMBERS["experience_cost"]), 4)
+
+    def test_health_rejects_digits_split_by_letters(self):
+        reader = Preparation.__new__(Preparation)
+        reader.load_ocr = Mock()
+        for text, expected in (("1O0", None), ("7l", None), ("71", 71), (".1.", 1), ("", None)):
+            with self.subTest(text=text):
+                reader.enlarged_text = Mock(return_value=text)
+                self.assertEqual(reader.health(object()), expected)
+
     def test_zero_and_whitespace_are_parsed_from_all_five_fields(self):
         result = parse_numbers(texts(gold=" 0 ", experience="0 / 20", level="Lv. 5"))
         self.assertEqual(result, {"result": "success", "gold": 0, "level": 5,
@@ -89,15 +107,21 @@ class NumberTests(unittest.TestCase):
         reader.resource = Mock()
         reader.ocr_ready = False
         reader.text = Mock(side_effect=lambda image, name, roi: texts()[name])
+        reader.enlarged_text = Mock(side_effect=lambda image, name, roi: texts()[name])
         first, second = object(), object()
         self.assertEqual(reader.numbers(first)["gold"], 31)
         self.assertEqual(reader.numbers(second)["experience"]["required"], 20)
         reader.resource.use_cpu.assert_called_once()
         reader.resource.post_ocr_model.assert_called_once()
-        self.assertEqual(reader.text.call_count, 10)
-        self.assertTrue(all(call.args[0] is first for call in reader.text.call_args_list[:5]))
-        self.assertTrue(all(call.args[0] is second for call in reader.text.call_args_list[5:]))
-        self.assertEqual({call.args[1]: call.args[2] for call in reader.text.call_args_list[:5]}, NUMBERS)
+        # 四个区域走普通 OCR，经验费用走放大 OCR。
+        self.assertEqual(reader.text.call_count, 8)
+        self.assertEqual(reader.enlarged_text.call_count, 2)
+        self.assertTrue(all(call.args[0] is first for call in reader.text.call_args_list[:4]))
+        self.assertTrue(all(call.args[0] is second for call in reader.text.call_args_list[4:]))
+        self.assertEqual({call.args[1]: call.args[2] for call in reader.text.call_args_list[:4]},
+                         {name: roi for name, roi in NUMBERS.items() if name != "experience_cost"})
+        self.assertEqual(reader.enlarged_text.call_args_list[0].args[1:],
+                         ("experience_cost", NUMBERS["experience_cost"]))
 
     def test_model_failure_is_reported_before_reading_regions(self):
         reader = Preparation.__new__(Preparation)

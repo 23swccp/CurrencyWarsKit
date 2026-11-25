@@ -84,7 +84,7 @@ class ExperienceTests(TestCase):
     def test_stops_after_unconfirmed_purchase_and_returns_partial_progress(self):
         unconfirmed = numbers(12, 0, level=4, required=8)
         session = self.session([numbers(20, 0), numbers(16, 0, level=4, required=8), unconfirmed])
-        with patch("screens.experience.monotonic", side_effect=[0, 10, 14]):
+        with patch("screens.experience.monotonic", side_effect=[0, 10, 20]):
             result = ROUTES["/buy-experience"](session, {"xp": 12})
         self.assertEqual(result["result"], "uncertain", result)
         self.assertEqual(result["screenshot"], "last.png")
@@ -113,6 +113,18 @@ class ExperienceTests(TestCase):
                 result = ROUTES["/buy-experience"](session, {"xp": 4})
                 self.assertEqual(result["result"], "success", result)
                 self.assertEqual(session.controller.clicks, [(297, 860)])
+
+    def test_later_batches_do_not_recheck_experience_cost(self):
+        session = self.session([
+            numbers(20, 0),
+            numbers(16, 0, level=4, required=8),
+            numbers(16, 0, level=4, required=8, cost=None),
+            numbers(12, 4, level=4, required=8),
+        ])
+        result = ROUTES["/buy-experience"](session, {"xp": 8})
+        self.assertEqual(result["result"], "success", result)
+        self.assertEqual((result["purchases_confirmed"], result["xp_bought"], result["gold_spent"]),
+                         (2, 8, 8))
 
     def test_verified_purchase_reports_progress_if_screenshot_save_fails(self):
         session = self.session([numbers(12, 0), numbers(8, 0, level=4, required=8)])
