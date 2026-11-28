@@ -56,6 +56,16 @@ class NumberTests(unittest.TestCase):
         reader.load_ocr()
         self.assertEqual(reader.integer(image, "gold", NUMBERS["gold"]), 8)
 
+    def test_gold_region_reads_live_open_and_closed_shop_frames(self):
+        fixtures = Path(__file__).parent / "fixtures" / "preparation"
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        reader.load_ocr()
+        for name, gold in (("gold-live-6.webp", 5), ("gold-live-9.webp", 4), ("gold-live-seven.webp", 7)):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                self.assertEqual(reader.integer(image, "gold", NUMBERS["gold"]), gold)
+
     def test_gold_region_reads_three_digits_from_saved_preparation_frame(self):
         path = Path(__file__).parent / "fixtures" / "armament" / "advanced-bench.webp"
         with Image.open(path) as source:

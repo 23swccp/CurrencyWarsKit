@@ -18,6 +18,7 @@ from screens import armament, card_stars, tea_break
 from screens.emblems import Emblems
 from screens.inventory import Inventory
 from game.actions import BUTTON_ACTIONS
+from game.nodes import ROUTES, reference
 from game.slots import (
     ACTION_BUTTON, BENCH, BENCH_WARNING, CARDS, CARDS_BY_BACKSTAGE, CARD_SIZE, FRONT,
     HEADER, HEALTH, ICONS, NODE, NODE_OPEN, NUMBERS, PORTRAIT, PHASE, PHASE_OPEN, SHOP, SHOP_OPEN, SLOTS_BY_BACKSTAGE,
@@ -32,19 +33,17 @@ WORKERS = 16
 MIN_SCORE = 0.8
 MIN_MARGIN = 0.1
 SEVEN_EMPTY_TEMPLATES = {f"back_{index}": f"back_seven_{index}" for index in range(4, 8)}
-# 每个位面的节点数：位面 1 打到 1-9、位面 2 记录到 2-9、位面 3 节点条只有 7 个且 3-7 是最后一关。
-PLANE_NODES = {1: 9, 2: 9, 3: 7}
-
-
 def progress(node):
     """把 1-4 这样的节点号拆成位面内进度，供 AI 判断还剩几关。"""
     match = re.fullmatch(r"(\d+)-(\d+)", node or "")
     if not match:
         return {}
     plane, index = int(match[1]), int(match[2])
-    total = PLANE_NODES.get(plane)
+    node_reference = reference(plane, index)
+    total = len(ROUTES[plane]) if node_reference is not None else None
     return {"plane": plane, "index": index, "nodes": total,
-            "remaining": None if total is None else max(0, total - index)}
+            "remaining": None if total is None else total - index,
+            "node_reference": node_reference}
 
 
 def parse_numbers(texts):

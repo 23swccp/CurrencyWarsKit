@@ -14,6 +14,7 @@ ROIS = {
     "entry": (1732, 711, 173, 82),
     "hud": (795, 31, 80, 60),
     "menu": (891, 137, 140, 52),
+    "meal": (891, 137, 140, 52),
     "reward": (843, 161, 235, 69),
     "settlement": (843, 161, 235, 69),
     "back": (1130, 787, 95, 65),
@@ -51,7 +52,7 @@ def matched(reader, image, mark, roi=None):
 def stage(reader, image):
     if not matched(reader, image, "hud"):
         return None
-    for mark in ("reward", "settlement", "menu"):
+    for mark in ("reward", "settlement", "menu", "meal"):
         if matched(reader, image, mark):
             return mark
     if matched(reader, image, "back"):
@@ -128,7 +129,7 @@ def read(reader, image, current):
               "node": node if re.fullmatch(r"\d+-\d+", node) else None,
               "health": reader.integer(image, "茶歇生命值", HEALTH),
               "gold": reader.integer(image, "茶歇金币", GOLD),
-              "needs_ai": current in {"menu", "commission"}}
+              "needs_ai": current in {"menu", "commission", "meal"}}
     if current in {"menu", "commission"}:
         options = read_menu(reader, image) if current == "menu" else read_commissions(reader, image)
         result["options"] = options
@@ -202,7 +203,7 @@ class TeaBreak:
             self.stage()
             raise InputUncertain(f"任务 {task} 未完成，节点 {nodes}")
 
-    def follow_choice(self):
+    def follow_choice(self, health_recovery=None):
         self.reader.load_ocr()
         deadline = monotonic() + 12
         last_line_count = 0
@@ -212,6 +213,8 @@ class TeaBreak:
                 return read(self.reader, self.image, current)
             if current == "reward":
                 return self.claim()
+            if current == "meal":
+                return self.meal(health_recovery)
             if current == "dialogue" and matched(self.reader, self.image, "prompt"):
                 line_count = len(self.reader.text_boxes(self.image, "茶歇对白", DIALOGUE))
                 # 防：继续提示在相邻对白之间仍可见，等新对白再推进。
@@ -227,8 +230,28 @@ class TeaBreak:
         button, point, _, _ = MENU[index]
         self.evidence["choice"] = option["title"]
         self.click("TeaChoose", ("menu", button), point,
-                   arrivals=(("hud", "reward"), ("hud", "back"), ("hud", "bubble"), ("hud", "prompt")))
-        return self.follow_choice()
+                   arrivals=(("hud", "reward"), ("hud", "back"), ("hud", "bubble"), ("hud", "prompt"),
+                             ("hud", "meal")))
+        return self.follow_choice(option.get("health_recovery"))
+
+    def meal(self, health_recovery):
+        before = read(self.reader, self.image, "meal")
+        # 防：菜单回复量漏读，无法核对美餐效果。
+        if health_recovery is None:
+            return {**before, "result": "uncertain", "needs_ai": True, "message": "茶歇回复量待确认"}
+        roi = (1680, 450, 165, 60)
+        self.click("TeaSelectMeal", ("hud", "meal"), (1450, 475),
+                   arrivals=(("hud", "meal", "confirm"),), confirm_roi=roi)
+        self.click("TeaConfirmMeal", ("hud", "meal", "confirm"), (1760, 480),
+                   arrivals=(("hud", "reward"),), confirm_roi=roi)
+        after = read(self.reader, self.image, "reward")
+        self.evidence["meal"] = {"health_before": before["health"], "health_after": after["health"],
+                                 "health_recovery": health_recovery}
+        # 防：回血数值漏读或变化与菜单显示不一致，无法确认回血结果。
+        if (before["health"] is None or after["health"] is None
+                or after["health"] - before["health"] != health_recovery):
+            return {**after, "result": "uncertain", "needs_ai": True, "message": "茶歇回血结果待核对"}
+        return self.claim()
 
     def commission(self, index, before):
         other = before["selected"]

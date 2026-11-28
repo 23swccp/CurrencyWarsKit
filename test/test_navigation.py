@@ -1,7 +1,14 @@
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, call, patch
 
+import numpy as np
+from PIL import Image
+
 from flow.navigation import Navigator, current_screen
+from ocr import ImageController
+from screens.environment import random_reveal
+from screens.preparation import Preparation
 
 
 class NavigationTests(unittest.TestCase):
@@ -231,6 +238,95 @@ class NavigationTests(unittest.TestCase):
         sleep.assert_not_called()
         self.assertEqual(nav.click.call_args_list, [call(960, 530), call(960, 984)])
         nav.session.capture.assert_not_called()
+
+    def test_blue_sea_confirms_revealed_environment_once(self):
+        nav = self.navigator([])
+        nav.wait_text = Mock(return_value="menu")
+        nav.texts = Mock(return_value=["蓝海"])
+        nav.capture_image.side_effect = ["reveal", "board"]
+        nav.tasker = Mock()
+        job = nav.tasker.post_task.return_value.wait.return_value
+        job.succeeded = True
+        job.get.return_value = Mock(nodes=[Mock(name="ConfirmRandomEnvironment", completed=True)])
+        with patch("flow.navigation.sleep"), patch("screens.environment.random_reveal", return_value=["特权阶级", "装备"]):
+            result = nav.run(1)
+        self.assertEqual(result["random_environment"], ["特权阶级", "装备"])
+        self.assertTrue(result["pipeline"]["succeeded"])
+        self.assertEqual(nav.click.call_args_list, [call(440, 530), call(960, 984)])
+        nav.tasker.post_task.assert_called_once()
+        nav.session.save_image.assert_called_once_with("board")
+
+    def test_blue_sea_unconfirmed_reveal_stops_before_second_confirmation(self):
+        nav = self.navigator([])
+        nav.wait_text = Mock(return_value="menu")
+        nav.texts = Mock(return_value=["蓝海"])
+        nav.tasker = Mock()
+        with patch("flow.navigation.sleep"), patch("screens.environment.random_reveal", return_value=None):
+            result = nav.run(1)
+        self.assertIn("随机环境页面待确认", result["message"])
+        self.assertTrue(result["input_sent"])
+        self.assertEqual(nav.click.call_args_list, [call(440, 530), call(960, 984)])
+        nav.tasker.post_task.assert_not_called()
+
+    def test_environment_reads_selected_card_title_before_clicking(self):
+        nav = self.navigator([])
+        nav.wait_text = Mock(return_value="menu")
+        nav.texts = Mock(return_value=[])
+        result = nav.run(3)
+        nav.texts.assert_called_once_with("menu", (1255, 380, 450, 34))
+        self.assertEqual(result["message"], "投资环境名称待确认")
+        self.assertFalse(result["input_sent"])
+        nav.click.assert_not_called()
+        nav.session.save_image.assert_called_once_with("menu")
+
+    def test_random_environment_reveal_is_distinct_from_three_card_menu(self):
+        reader = Preparation()
+        self.addCleanup(reader.close)
+        reader.load_ocr()
+        fixtures = Path(__file__).parent / "fixtures" / "environment"
+        for name, expected in (("blue-sea-menu.webp", False), ("random-reveal.webp", True)):
+            with self.subTest(frame=name), Image.open(fixtures / name) as source:
+                image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+                texts = lambda frame, roi: [item["text"] for item in reader.text_boxes(frame, "投资环境", roi)]
+                result = random_reveal(image, texts)
+                self.assertEqual(result is not None, expected)
+                if expected:
+                    self.assertIn("特权阶级", result)
+
+    def test_blue_sea_saved_frames_through_navigation_pipeline(self):
+        fixtures = Path(__file__).parent / "fixtures" / "environment"
+        def frame(name):
+            with Image.open(fixtures / f"{name}.webp") as source:
+                return np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+
+        class Replay(ImageController):
+            def __init__(self):
+                super().__init__(frame("blue-sea-menu"))
+                self.frames = iter(("blue-sea-menu", "random-reveal", "intro"))
+                self.clicks = []
+
+            def click(self, x, y):
+                self.clicks.append((x, y))
+                self.image = frame(next(self.frames))
+                return True
+
+            def touch_down(self, contact, x, y, pressure):
+                return self.click(x, y)
+
+            def touch_up(self, contact):
+                return True
+
+        session = Mock()
+        session.controller = Replay()
+        self.assertTrue(session.controller.set_screenshot_use_raw_size(True))
+        self.assertTrue(session.controller.post_connection().wait().succeeded)
+        session.save_image.return_value = {"screenshot": "replay.png"}
+        nav = Navigator(session)
+        with patch("flow.navigation.sleep"):
+            result = nav.run(1)
+        self.assertTrue(result["pipeline"]["succeeded"], result)
+        self.assertIn("特权阶级", result["random_environment"])
+        self.assertEqual(session.controller.clicks, [(440, 530), (960, 984), (960, 984)])
 
 
 if __name__ == "__main__":

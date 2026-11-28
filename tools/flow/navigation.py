@@ -220,12 +220,48 @@ class Navigator:
             image = self.capture_image()
 
     def choose_environment(self, option):
+        from screens.environment import CARDS, REVEAL_CONFIRM, random_reveal
+
         # 防：option 坐标只适用于投资环境页。
-        self.wait_text((850, 65, 240, 75), "投资环境")
+        image = self.wait_text((850, 65, 240, 75), "投资环境")
+        x, y, width, _ = CARDS[option - 1]
+        titles = self.texts(image, (x, y, width, 34))
+        # 防：目标卡标题漏读，无法判断是否需要确认随机环境。
+        if not titles:
+            return {**self.session.save_image(image), "result": "uncertain", "needs_ai": True,
+                    "action": "choose_environment", "option": option, "input_sent": False,
+                    "message": "投资环境名称待确认"}
+        is_blue_sea = any("".join(value.split()) == "蓝海" for value in titles)
         self.click(*OPTIONS[option - 1])
         self.wait_text((770, 950, 385, 75), "确认")
         self.click(*CONFIRM)
         sleep(4)  # 用户指定确认投资环境后等待 4 秒，再点击左下角关闭说明。
+        if is_blue_sea:
+            image = self.capture_image()
+            revealed = random_reveal(image, self.texts)
+            # 防：蓝海的随机环境尚未显示或文字漏读，不重复确认。
+            if revealed is None:
+                return {**self.session.save_image(image), "result": "uncertain", "needs_ai": True,
+                        "action": "choose_environment", "option": option, "input_sent": True,
+                        "message": "已选择蓝海，随机环境页面待确认，请勿重复选择"}
+            task = "ConfirmRandomEnvironment"
+            pipeline = {
+                task: {"recognition": {"type": "OCR", "param": {"expected": ["确认"],
+                         "roi": list(REVEAL_CONFIRM)}},
+                       "action": {"type": "Click", "param": {"target": [960, 984, 1, 1]}},
+                       "post_delay": 300, "timeout": 8000, "next": ["RandomEnvironmentArrived"]},
+                "RandomEnvironmentArrived": {"recognition": {"type": "OCR", "param": {
+                    "expected": ["备战阶段"], "roi": [390, 20, 150, 75]}}},
+            }
+            job = self.tasker.post_task(task, pipeline).wait()
+            image = self.capture_image()
+            detail = job.get()
+            nodes = [(node.name, node.completed) for node in detail.nodes] if detail else None
+            return {**self.session.save_image(image), "result": "uncertain", "needs_ai": True,
+                    "action": "choose_environment", "option": option, "input_sent": True,
+                    "random_environment": revealed,
+                    "pipeline": {"succeeded": job.succeeded, "nodes": nodes},
+                    "message": "随机环境确认后请查看备战和开场说明" if job.succeeded else "随机环境确认结果待核对"}
         self.click(*DISMISS_INTRO)
         return {**self.session.capture(), "result": "uncertain", "action": "choose_environment",
                 "option": option, "message": "已确认投资环境，等待 4 秒后点击一次左下角；请查看截图确认备战页"}

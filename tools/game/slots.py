@@ -46,7 +46,7 @@ ACTION_BUTTON = (1700, 710, 210, 90)
 BENCH_WARNING = (775, 515, 400, 40)
 
 NUMBERS = {
-    "gold": (1625, 897, 66, 48),
+    "gold": (1625, 895, 85, 55),
     "level": (255, 893, 80, 43),
     "experience": (250, 935, 96, 33),
     "experience_cost": (285, 970, 52, 44),

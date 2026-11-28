@@ -158,6 +158,58 @@ class TeaBreakTests(TestCase):
         self.assertEqual(session.controller.clicks, [(386, 837)])
         claim.assert_called_once()
 
+    def test_meal_choice_selects_and_confirms_before_reward(self):
+        session = self.session("meal-menu", (("meal",), ("meal-selected",), ("meal-reward",)))
+        with patch("screens.tea_break.TeaBreak.claim", return_value={"result": "success", "stage": "reward"}):
+            result = ROUTES["/tea-break-choose"](session, {"option": 2})
+        self.assertEqual((result["result"], result["stage"]), ("success", "reward"), result)
+        self.assertEqual(result["tea_break"]["meal"], {"health_before": 41, "health_after": 61,
+                                                       "health_recovery": 20})
+        self.assertEqual(session.controller.clicks, [(1534, 837), (1450, 475), (1760, 480)])
+
+    def test_meal_selection_timeout_does_not_click_confirm(self):
+        session = self.session("meal-menu", (("meal",), ("meal",)))
+        result = ROUTES["/tea-break-choose"](session, {"option": 2})
+        self.assertEqual((result["result"], result["stage"]), ("uncertain", "meal"), result)
+        self.assertIn("TeaSelectMeal", result["message"])
+        self.assertEqual(session.controller.clicks, [(1534, 837), (1450, 475)])
+
+    def test_meal_missing_recovery_stops_before_selecting(self):
+        from screens.tea_break import read_menu
+
+        session = self.session("meal-menu", (("meal",),))
+        def omit_recovery(reader, image):
+            options = read_menu(reader, image)
+            del options[1]["health_recovery"]
+            return options
+        with patch("screens.tea_break.read_menu", side_effect=omit_recovery):
+            result = ROUTES["/tea-break-choose"](session, {"option": 2})
+        self.assertEqual((result["result"], result["stage"]), ("uncertain", "meal"), result)
+        self.assertEqual(result["message"], "茶歇回复量待确认")
+        self.assertEqual(session.controller.clicks, [(1534, 837)])
+
+    def test_meal_unreadable_health_stops_before_claim(self):
+        session = self.session("meal-menu", (("meal",), ("meal-selected",), ("meal-reward",)))
+        reader = session.preparation_reader()
+        integer = reader.integer
+        reader.integer = Mock(side_effect=lambda image, name, roi:
+                              None if name == "茶歇生命值" else integer(image, name, roi))
+        result = ROUTES["/tea-break-choose"](session, {"option": 2})
+        self.assertEqual((result["result"], result["stage"]), ("uncertain", "reward"), result)
+        self.assertEqual(result["message"], "茶歇回血结果待核对")
+        self.assertEqual(session.controller.clicks, [(1534, 837), (1450, 475), (1760, 480)])
+
+    def test_meal_unexpected_health_change_stops_before_claim(self):
+        session = self.session("meal-menu", (("meal",), ("meal-selected",), ("meal-reward",)))
+        reader = session.preparation_reader()
+        integer = reader.integer
+        reader.integer = Mock(side_effect=lambda image, name, roi:
+                              41 if name == "茶歇生命值" else integer(image, name, roi))
+        result = ROUTES["/tea-break-choose"](session, {"option": 2})
+        self.assertEqual((result["result"], result["stage"]), ("uncertain", "reward"), result)
+        self.assertEqual(result["message"], "茶歇回血结果待核对")
+        self.assertEqual(session.controller.clicks, [(1534, 837), (1450, 475), (1760, 480)])
+
     def test_unconfirmed_tea_transition_keeps_frame_and_does_not_repeat_click(self):
         session = self.session("menu")
         result = ROUTES["/tea-break-choose"](session, {"option": 2})

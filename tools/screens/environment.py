@@ -3,6 +3,18 @@
 from recognition_debug import focus
 
 CARDS = ((215, 380, 450, 465), (735, 380, 450, 465), (1255, 380, 450, 465))
+REVEAL_CARD = (755, 380, 410, 110)
+REVEAL_CONFIRM = (900, 950, 120, 75)
+
+
+def random_reveal(image, texts):
+    header = texts(image, (850, 65, 240, 75))
+    center = texts(image, REVEAL_CARD)
+    confirm = texts(image, REVEAL_CONFIRM)
+    if (any("投资环境" in value for value in header) and len(center) >= 2
+            and any("确认" in value for value in confirm)):
+        return center
+    return None
 
 
 def recognize(image, read, equipment):

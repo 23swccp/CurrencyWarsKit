@@ -44,10 +44,31 @@ class StrategyReaderTests(unittest.TestCase):
         self.addCleanup(preparation.close)
         reader = Strategy(preparation)
         fixtures = Path(__file__).parent / "fixtures" / "strategy"
-        for name, expected in (("before.webp", None), ("selected.webp", 2)):
+        for name, expected in (("before.webp", None), ("selected.webp", 2),
+                               ("silver-before.webp", None), ("silver-selected.webp", 3)):
             with self.subTest(frame=name), Image.open(fixtures / name) as source:
                 image = np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
                 self.assertEqual(reader.selected(image), expected)
+
+    def test_silver_selected_frame_through_choice(self):
+        preparation = Preparation()
+        self.addCleanup(preparation.close)
+        reader = Strategy(preparation)
+        fixtures = Path(__file__).parent / "fixtures"
+        def load(path):
+            with Image.open(path) as source:
+                return np.asarray(source.convert("RGB"))[:, :, ::-1].copy()
+        before = load(fixtures / "strategy" / "silver-before.webp")
+        selected = load(fixtures / "strategy" / "silver-selected.webp")
+        board = load(fixtures / "preparation" / "gold-eight.webp")
+        session = Mock()
+        session.controller.post_screencap.return_value.wait.return_value.succeeded = True
+        session.controller.post_screencap.return_value.wait.return_value.get.side_effect = [before, selected, board]
+        session.controller.post_click.return_value.wait.return_value.succeeded = True
+        session.save_image.return_value = {"screenshot": "board.png"}
+        result = StrategyOperation(session, reader).run("choose", 3)
+        self.assertEqual((result["result"], result["screen"]), ("success", "备战"), result)
+        self.assertEqual(session.controller.post_click.call_args_list, [call(*OPTIONS[2]), call(*CONFIRM)])
 
     def test_partial_cards_keep_unknown_separate_from_zero(self):
         self.reader.text = Mock(side_effect=["", "效果甲", "刷新次数0",

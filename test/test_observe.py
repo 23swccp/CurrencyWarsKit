@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from flow.observe import observe
+from screens.preparation import progress
 
 
 class ObserveTests(unittest.TestCase):
@@ -30,16 +31,29 @@ class ObserveTests(unittest.TestCase):
 
     def test_closed_preparation_returns_same_frame(self):
         self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'closed'}
-        self.preparation.observe.return_value = {'slots': {'front_1': None}, 'gold': 5}
+        self.preparation.observe.return_value = {'slots': {'front_1': None}, 'gold': 5, **progress('1-3')}
         result = observe(self.session)
         self.assertEqual(result['gold'], 5)
+        self.assertEqual(result['node_reference']['nodes'][0],
+                         {'node': '1-3', 'possible_types': ['战斗']})
         self.assertEqual(result['screenshot'], 'same.png')
         self.preparation.observe.assert_called_once_with(self.image)
         self.assertNotIn('shop_slots', result)
         self.assert_read_only()
 
+    def test_open_shop_with_unrecognized_node_omits_progress(self):
+        self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'open', 'node': None}
+        info = {'refresh_mode': 'paid', 'refresh_cost': 2, 'free_refreshes': 0, 'gold': 9}
+        with patch('flow.observe.read_refresh', return_value=info), \
+                patch('flow.observe.read_cards', return_value={}):
+            result = observe(self.session)
+        self.assertIsNone(result['node'])
+        for key in ('plane', 'index', 'nodes', 'remaining', 'node_reference'):
+            self.assertNotIn(key, result)
+        self.assert_read_only()
+
     def test_open_shop_reads_names_stars_and_empty_slots_on_the_returned_frame(self):
-        self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'open'}
+        self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'open', 'node': '2-2'}
         self.preparation.text.side_effect = ['白露', '刻律德', '银狼 LV.999', '']
         self.preparation.text_boxes.return_value = []
         self.preparation.integer.return_value = None
@@ -52,6 +66,9 @@ class ObserveTests(unittest.TestCase):
         self.assertEqual(result['shop'], 'open')
         self.assertIsNone(result['health'])
         self.assertEqual(result['gold'], 9)
+        self.assertEqual((result['nodes'], result['remaining']), (7, 5))
+        self.assertEqual(result['node_reference']['nodes'][0],
+                         {'node': '2-2', 'possible_types': ['投资策略']})
         self.assertEqual(result['shop_slots'], {'shop_1': '白露', 'shop_2': '刻律德菈', 'shop_3': '银狼LV.999',
                                                'shop_4': None, 'shop_5': None})
         self.assertEqual(result['shop_stars'], {'shop_1': 1, 'shop_2': 2, 'shop_3': 1,
@@ -68,7 +85,7 @@ class ObserveTests(unittest.TestCase):
         self.assert_read_only()
 
     def test_whole_card_recovers_character_name_and_reads_wrapped_effect(self):
-        self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'open'}
+        self.layout.return_value = {'result': 'success', 'screen': '备战', 'shop': 'open', 'node': '2-2'}
         self.preparation.text.side_effect = ['知更鸟·晴歌', '绯英', '长夜', '赛飞儿', '肖像速写']
         self.preparation.text_boxes.side_effect = [
             [{'text': '长夜月', 'box': [921, 294, 72, 22]}],

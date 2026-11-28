@@ -2,6 +2,7 @@
 
 from flow.preparation_scene import identify, read_choice
 from screens import armament
+from screens.preparation import progress
 from screens.shop import complete as shop_complete, read_cards, read_refresh
 
 
@@ -32,7 +33,8 @@ def inspect(session, image):
         return {**scene, **preparation.observe(image)}
 
     # 防：展开的商店遮住备战顶部生命值。
-    result = {**scene, "health": None, **read_refresh(image, preparation), **read_cards(image, preparation)}
+    result = {**scene, **progress(scene["node"]), "health": None,
+              **read_refresh(image, preparation), **read_cards(image, preparation)}
     # 防：商店已展开，但 OCR 未读全刷新信息。
     if not shop_complete(result):
         result.update(result="uncertain", needs_ai=True, message="商店刷新信息待确认")

@@ -126,12 +126,33 @@ class PreparationTests(unittest.TestCase):
         return self.image
 
     def test_progress_splits_plane_index_and_leaves_unknown_nodes_empty(self):
-        self.assertEqual(progress("2-4"), {"plane": 2, "index": 4, "nodes": 9, "remaining": 5})
-        self.assertEqual(progress("1-9"), {"plane": 1, "index": 9, "nodes": 9, "remaining": 0})
-        self.assertEqual(progress("3-5"), {"plane": 3, "index": 5, "nodes": 7, "remaining": 2})
-        self.assertEqual(progress("4-1"), {"plane": 4, "index": 1, "nodes": None, "remaining": None})
+        for node, expected in (("2-4", (2, 4, 7, 3)), ("1-9", (1, 9, 9, 0)),
+                               ("2-7", (2, 7, 7, 0)), ("3-7", (3, 7, 7, 0)),
+                               ("3-5", (3, 5, 7, 2)), ("4-1", (4, 1, None, None)),
+                               ("2-9", (2, 9, None, None)), ("1-0", (1, 0, None, None)),
+                               ("1-10", (1, 10, None, None)), ("3-8", (3, 8, None, None))):
+            with self.subTest(node=node):
+                result = progress(node)
+                self.assertEqual(tuple(result[key] for key in ("plane", "index", "nodes", "remaining")), expected)
+        self.assertIsNone(progress("4-1")["node_reference"])
+        self.assertIsNone(progress("2-9")["node_reference"])
+        self.assertIsNone(progress("1-0")["node_reference"])
         self.assertEqual(progress(None), {})
         self.assertEqual(progress("未知"), {})
+
+    def test_user_node_reference_preserves_event_alternatives(self):
+        first = progress("1-1")["node_reference"]
+        self.assertEqual(first["source"], "user_example")
+        self.assertEqual([entry["possible_types"] for entry in first["nodes"]], [
+            ["奖励"], ["奖励"], ["战斗"], ["战斗"], ["补给"], ["战斗"],
+            ["遭遇"], ["奖励", "幕后茶歇"], ["首领"]])
+        self.assertEqual(progress("1-9")["node_reference"]["nodes"],
+                         [{"node": "1-9", "possible_types": ["首领"]}])
+        for plane in (2, 3):
+            entries = progress(f"{plane}-2")["node_reference"]["nodes"]
+            self.assertEqual([entry["node"] for entry in entries], [f"{plane}-{index}" for index in range(2, 8)])
+            self.assertEqual([entry["possible_types"] for entry in entries], [
+                ["投资策略"], ["补给"], ["战斗"], ["遭遇"], ["奖励", "幕后茶歇"], ["首领"]])
 
     def test_positions_come_from_roster_and_skip_unknown_cards(self):
         reader = Preparation.__new__(Preparation)
@@ -171,6 +192,8 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(fronts[1]["positions"], ["front", "back"])
         self.assertEqual(result["front_capacity"], 4)
         self.assertEqual((result["plane"], result["index"], result["nodes"], result["remaining"]), (1, 1, 9, 8))
+        self.assertEqual(result["node_reference"]["nodes"][0],
+                         {"node": "1-1", "possible_types": ["奖励"]})
         observer.mark.assert_any_call(image, (697, 427, 91, 40), "front_1 星级", "crop")
 
     def test_same_character_can_occupy_multiple_slots(self):

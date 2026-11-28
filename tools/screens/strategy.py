@@ -30,7 +30,7 @@ class Strategy(Recognition):
             raise RuntimeError("投资策略图片控制器连接失败")
         super().__init__(self.controller)
         self.ocr_ready = False
-        for name in ("title", "selected", "selected_prismatic"):
+        for name in ("title", "selected", "selected_prismatic", "selected_silver"):
             with Image.open(ASSETS / "strategy" / f"{name}.png") as image:
                 self.resource.override_image(f"{name}.png", np.asarray(image.convert("RGB"))[:, :, ::-1].copy())
 
@@ -51,7 +51,7 @@ class Strategy(Recognition):
     def selected(self, image):
         for index, x in enumerate(LEFTS, 1):
             if any(self.score(image, f"{name}.png", (x - 10, 180, 70, 75)) >= 0.9
-                   for name in ("selected", "selected_prismatic")):
+                   for name in ("selected", "selected_prismatic", "selected_silver")):
                 return index
         return None
 
