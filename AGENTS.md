@@ -1,6 +1,6 @@
 # AGENTS.md
 
-写给在本仓库工作的 AI 助手。面向人的设计说明在 `README.md`，改动记录在 `PROGRESS.md`。
+写给在本仓库工作的 AI 助手。面向人的设计说明在 `README.md`；改动记录保存在本地 `PROGRESS.md`，不随仓库分发，首次使用时可创建。
 
 ## 项目
 

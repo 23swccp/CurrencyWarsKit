@@ -134,7 +134,7 @@ $env:PYTHONPATH = "$PWD\tools"
 .\.venv\Scripts\python.exe -m unittest discover -s test -q
 ```
 
-测试使用模拟输入，不向真实游戏窗口发送操作。项目正在开发，游戏版本、界面布局和识别素材变化都可能影响结果；设计及验证状态以对应的[设计页](design/README.md)和[开发进展](PROGRESS.md)为准。
+测试使用模拟输入，不向真实游戏窗口发送操作。项目正在开发，游戏版本、界面布局和识别素材变化都可能影响结果；设计及验证状态见对应的[设计页](design/README.md)。
 
 ## 许可证
 
